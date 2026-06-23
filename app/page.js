@@ -14,6 +14,7 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [checkingSession, setCheckingSession] = useState(true);
+  const [isImpersonated, setIsImpersonated] = useState(false);
 
   // Inboxes state
   const [inboxes, setInboxes] = useState([]);
@@ -106,6 +107,7 @@ export default function Home() {
       if (data.authenticated) {
         setIsAuthenticated(true);
         setUser(data.user);
+        setIsImpersonated(!!data.isImpersonated);
         if (data.user.status === 'approved') {
           fetchInboxes(data.user.id);
         }
@@ -235,6 +237,7 @@ export default function Home() {
       if (res.ok && data.success) {
         setIsAuthenticated(true);
         setUser(data.user);
+        setIsImpersonated(!!data.isImpersonated);
         addToast(authMode === 'login' ? 'Welcome back!' : 'Registered successfully!');
         // Load inboxes if user is approved
         if (data.user.status === 'approved') {
@@ -270,6 +273,18 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Logout failed:', err);
+    }
+  };
+
+  const handleExitImpersonation = async () => {
+    try {
+      const res = await fetch('/api/admin/impersonate/exit', { method: 'POST' });
+      if (res.ok) {
+        addToast('Exiting user account view...', 'success');
+        window.location.href = '/admin'; // Redirect back to Admin panel
+      }
+    } catch (err) {
+      console.error('Failed to exit impersonation:', err);
     }
   };
 
@@ -378,6 +393,43 @@ export default function Home() {
         <div className="bg-glow-1"></div>
         <div className="bg-glow-2"></div>
       </div>
+
+      {/* Impersonation Warning Banner */}
+      {isImpersonated && (
+        <div style={{
+          width: '100%',
+          background: 'rgba(147, 51, 234, 0.15)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          borderBottom: '1px solid rgba(147, 51, 234, 0.3)',
+          padding: '0.65rem 1rem',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '1rem',
+          fontSize: '0.85rem',
+          fontWeight: '600',
+          color: '#fff',
+          zIndex: 9999,
+          position: 'relative',
+          animation: 'fadeInDown 0.4s ease'
+        }}>
+          <span>👀 Impersonating User: <strong style={{ color: 'var(--primary-hover)' }}>{user?.email}</strong></span>
+          <button 
+            onClick={handleExitImpersonation}
+            className="btn-primary" 
+            style={{ 
+              padding: '0.35rem 0.85rem', 
+              borderRadius: '8px', 
+              fontSize: '0.75rem', 
+              boxShadow: 'none',
+              background: 'var(--primary)',
+            }}
+          >
+            Exit and Return to Admin
+          </button>
+        </div>
+      )}
 
       <div className="app-container">
         {/* Header */}

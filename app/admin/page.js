@@ -158,6 +158,27 @@ export default function AdminDashboard() {
     }
   };
 
+  const impersonateUser = async (userId) => {
+    try {
+      const res = await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addToast('Entering user account view...', 'success');
+        window.location.href = '/';
+      } else {
+        addToast(data.error || 'Failed to enter user account', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      addToast('An error occurred during impersonation', 'error');
+    }
+  };
+
   // Stats calculation
   const totalUsers = users.length;
   const pendingApprovals = users.filter((u) => u.status === 'pending').length;
@@ -369,6 +390,13 @@ export default function AdminDashboard() {
                             </td>
                             <td style={{ padding: '0.95rem 1.25rem', textAlign: 'right' }}>
                               <div style={{ display: 'inline-flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                <button 
+                                  className="btn-secondary" 
+                                  style={{ padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem', color: 'var(--primary-hover)', borderColor: 'rgba(168, 85, 247, 0.2)', background: 'rgba(168, 85, 247, 0.03)' }} 
+                                  onClick={() => impersonateUser(user._id)}
+                                >
+                                  View Activity
+                                </button>
                                 {user.status !== 'approved' && (
                                   <button 
                                     className="btn-primary" 

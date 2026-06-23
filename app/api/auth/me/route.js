@@ -17,9 +17,12 @@ export async function GET(req) {
       return NextResponse.json({ authenticated: false }, { status: 404 });
     }
 
+    const hasAdminSession = !!req.cookies.get('admin_session');
+
     return NextResponse.json({
       authenticated: true,
       user: { id: user._id, email: user.email, status: user.status || 'pending' },
+      isImpersonated: hasAdminSession,
     }, { status: 200 });
 
   } catch (error) {
