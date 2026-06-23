@@ -19,7 +19,7 @@ export async function GET(req) {
 
     return NextResponse.json({
       authenticated: true,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, status: user.status || 'pending' },
     }, { status: 200 });
 
   } catch (error) {

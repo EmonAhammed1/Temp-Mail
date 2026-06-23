@@ -41,7 +41,7 @@ export async function POST(req) {
 
     return NextResponse.json({
       success: true,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, status: user.status || 'pending' },
     }, { status: 200 });
 
   } catch (error) {

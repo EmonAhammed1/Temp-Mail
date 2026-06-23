@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/db';
 import Email from '@/models/Email';
 import Inbox from '@/models/Inbox';
+import User from '@/models/User';
 import { getUserFromRequest } from '@/lib/auth';
 
 // GET /api/emails?address=example@yourdomain.com
@@ -22,6 +23,10 @@ export async function GET(req) {
     const cleanAddress = address.toLowerCase().trim();
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
 
     // Verify user owns this inbox
     const inbox = await Inbox.findOne({ address: cleanAddress, userId });
@@ -57,6 +62,10 @@ export async function DELETE(req) {
     }
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
 
     // 1. Fetch the email to check the recipient address
     const email = await Email.findById(id);

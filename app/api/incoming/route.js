@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import dbConnect from '@/lib/db';
 import Email from '@/models/Email';
 import Inbox from '@/models/Inbox';
@@ -33,6 +34,14 @@ export async function POST(req) {
       console.log(`[API Incoming] Ignored email for ${cleanTo} because the inbox is not active/registered.`);
       // Return 202 Accepted so Cloudflare doesn't keep retrying, but explain it was not stored.
       return NextResponse.json({ success: false, message: 'Recipient inbox not active/found' }, { status: 202 });
+    }
+
+    // 4.5 Check if the user owning this inbox is approved
+    const User = mongoose.models.User || mongoose.model('User');
+    const user = await User.findById(inbox.userId).lean();
+    if (!user || user.status !== 'approved') {
+      console.log(`[API Incoming] Ignored email for ${cleanTo} because the user status is ${user?.status || 'not found'}`);
+      return NextResponse.json({ success: false, message: 'Recipient account is not approved' }, { status: 202 });
     }
 
     // 5. Save incoming email

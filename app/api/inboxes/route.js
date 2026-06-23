@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/db';
 import Inbox from '@/models/Inbox';
 import Email from '@/models/Email';
+import User from '@/models/User';
 import { getUserFromRequest } from '@/lib/auth';
 
 const DOMAIN = process.env.NEXT_PUBLIC_DOMAIN || 'lumina-mail.my';
@@ -15,6 +16,10 @@ export async function GET(req) {
     }
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
     const inboxes = await Inbox.find({ userId }).sort({ createdAt: -1 }).lean();
 
     return NextResponse.json({ success: true, inboxes }, { status: 200 });
@@ -53,6 +58,10 @@ export async function POST(req) {
     const fullEmail = `${finalPrefix}@${DOMAIN}`.toLowerCase().trim();
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
 
     // Enforce uniqueness across all users
     const existingInbox = await Inbox.findOne({ address: fullEmail });
@@ -94,6 +103,10 @@ export async function DELETE(req) {
     const cleanAddress = address.toLowerCase().trim();
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
 
     // Verify ownership
     const inbox = await Inbox.findOne({ address: cleanAddress, userId });

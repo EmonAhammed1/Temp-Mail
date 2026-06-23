@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/db';
 import Sms from '@/models/Sms';
+import User from '@/models/User';
 import { getUserFromRequest } from '@/lib/auth';
 
 export async function GET(req) {
@@ -18,6 +19,10 @@ export async function GET(req) {
     console.log(`[API SMS GET Fetching] Filter to: ${to || 'all'}`);
 
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
 
     // Query messages. If 'to' parameter is specified, filter by receiver number
     const query = to ? { to } : {};
@@ -58,6 +63,10 @@ export async function DELETE(req) {
 
     console.log(`[API SMS DELETING] messageId: ${id}`);
     await dbConnect();
+    const user = await User.findById(userId).lean();
+    if (!user || user.status !== 'approved') {
+      return NextResponse.json({ error: 'Account pending approval' }, { status: 403 });
+    }
     const deleted = await Sms.findByIdAndDelete(id);
     
     if (deleted) {

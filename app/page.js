@@ -106,7 +106,9 @@ export default function Home() {
       if (data.authenticated) {
         setIsAuthenticated(true);
         setUser(data.user);
-        fetchInboxes(data.user.id);
+        if (data.user.status === 'approved') {
+          fetchInboxes(data.user.id);
+        }
       }
     } catch (err) {
       console.error('Session check failed:', err);
@@ -234,8 +236,10 @@ export default function Home() {
         setIsAuthenticated(true);
         setUser(data.user);
         addToast(authMode === 'login' ? 'Welcome back!' : 'Registered successfully!');
-        // Load inboxes
-        fetchInboxes();
+        // Load inboxes if user is approved
+        if (data.user.status === 'approved') {
+          fetchInboxes();
+        }
         // Reset auth fields
         setAuthEmail('');
         setAuthPassword('');
@@ -461,6 +465,39 @@ export default function Home() {
                   </>
                 )}
               </div>
+            </div>
+          </section>
+        ) : user?.status === 'pending' || user?.status === 'rejected' ? (
+          /* Pending / Rejected Approval view */
+          <section className="auth-container">
+            <div className="glass-panel auth-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'center', border: user?.status === 'rejected' ? '1px solid rgba(244, 63, 94, 0.2)' : '1px solid rgba(147, 51, 234, 0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', color: user?.status === 'rejected' ? 'var(--error)' : 'var(--primary-hover)' }}>
+                {user?.status === 'rejected' ? (
+                  <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                ) : (
+                  <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                )}
+              </div>
+              <h2 className="auth-title" style={{ background: user?.status === 'rejected' ? 'linear-gradient(to right, #fff, #f43f5e)' : 'linear-gradient(to right, #fff, #c084fc)' }}>
+                {user?.status === 'rejected' ? 'Access Denied' : 'Approval Pending'}
+              </h2>
+              <p style={{ fontSize: '0.95rem', color: 'var(--muted)', lineHeight: '1.6' }}>
+                Hello <strong>{user?.email}</strong>, {user?.status === 'rejected' 
+                  ? 'your account registration was rejected or suspended by the administrator.' 
+                  : 'your account has been created and is currently pending administrator approval.'}
+              </p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: '1.5', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '10px' }}>
+                {user?.status === 'rejected' 
+                  ? 'Please contact support if you believe this is a mistake.' 
+                  : 'Please check back later or contact the administrator to activate your account.'}
+              </p>
+              <button className="btn-secondary" onClick={handleLogout} style={{ marginTop: '0.5rem', height: '48px', width: '100%' }}>
+                Log Out
+              </button>
             </div>
           </section>
         ) : (
