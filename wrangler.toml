@@ -1,0 +1,7 @@
+name = "temp-mail-router"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-03-01"
+
+[vars]
+VERCEL_API_URL = "https://temp-mail-system-six.vercel.app"
+WEBHOOK_TOKEN = "tmp_webhook_7c3aed9b2f15a9"
