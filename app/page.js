@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import LoginCartoon from './components/LoginCartoon';
 
 const DOMAIN = process.env.NEXT_PUBLIC_DOMAIN || 'lumina-mail.my';
 
@@ -33,6 +34,7 @@ export default function Home() {
   const [toasts, setToasts] = useState([]);
   const [copied, setCopied] = useState(false);
   const pollIntervalRef = useRef(null);
+  const [focusedField, setFocusedField] = useState('');
 
   // Workspace active tab ('mail' or 'sms')
   const [activeTab, setActiveTab] = useState('mail');
@@ -461,8 +463,9 @@ export default function Home() {
         {/* 1. Unauthenticated Login/Signup Views */}
         {!isAuthenticated ? (
           <section className="auth-container">
-            <div className="glass-panel auth-card">
-              <h2 className="auth-title">{authMode === 'login' ? 'Sign In' : 'Create Account'}</h2>
+            <div className="glass-panel auth-card" style={{ overflow: 'visible' }}>
+              <LoginCartoon focusedField={focusedField} emailLength={authEmail.length} />
+              <h2 className="auth-title" style={{ marginTop: '-0.5rem' }}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h2>
               
               {authError && (
                 <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)', color: 'var(--error)', padding: '0.85rem 1.15rem', borderRadius: '12px', fontSize: '0.85rem', textAlign: 'center' }}>
@@ -479,6 +482,8 @@ export default function Home() {
                     placeholder="name@email.com" 
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
+                    onFocus={() => setFocusedField('email')}
+                    onBlur={() => setFocusedField('')}
                     required
                   />
                 </div>
@@ -491,6 +496,8 @@ export default function Home() {
                     placeholder="••••••••" 
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
+                    onFocus={() => setFocusedField('password')}
+                    onBlur={() => setFocusedField('')}
                     required
                   />
                 </div>

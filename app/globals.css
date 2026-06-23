@@ -941,3 +941,29 @@ html, body {
   box-shadow: 0 4px 12px rgba(147, 51, 234, 0.2);
 }
 
+/* Styled Input Fields matching Admin Portal style */
+.input-field {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.input-field:focus {
+  border-color: var(--primary);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.15);
+}
+
+.input-field::placeholder {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+
