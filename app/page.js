@@ -41,6 +41,20 @@ export default function Home() {
   const [replyRecipient, setReplyRecipient] = useState('');
   const [replySending, setReplySending] = useState(false);
 
+  // Compose New Email state
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [composeFrom, setComposeFrom] = useState('');
+  const [composeTo, setComposeTo] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeMessage, setComposeMessage] = useState('');
+  const [composeSending, setComposeSending] = useState(false);
+
+  // Resizable Panes state (Sidebar & List widths)
+  const [sidebarWidth, setSidebarWidth] = useState(330);
+  const [listWidth, setListWidth] = useState(400);
+  const [isDragging, setIsDragging] = useState(null); // 'sidebar' | 'list' | null
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
   // General UI state
   const [toasts, setToasts] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -66,9 +80,15 @@ export default function Home() {
     }, 3500);
   };
 
-  // 1. Session check on mount
+  // 1. Session check on mount & restore pane widths
   useEffect(() => {
     checkSession();
+    try {
+      const savedSidebar = localStorage.getItem('temp_mail_sidebar_width');
+      const savedList = localStorage.getItem('temp_mail_list_width');
+      if (savedSidebar) setSidebarWidth(Math.max(220, Math.min(500, parseInt(savedSidebar, 10))));
+      if (savedList) setListWidth(Math.max(280, Math.min(650, parseInt(savedList, 10))));
+    } catch (e) {}
   }, []);
 
   // 2. Fetch emails & start polling whenever activeInbox or activeTab changes
@@ -111,6 +131,39 @@ export default function Home() {
       if (smsPollIntervalRef.current) clearInterval(smsPollIntervalRef.current);
     };
   }, [activeTab]);
+
+  // Pane Resizing Drag Handlers
+  const startResizing = (type) => (e) => {
+    e.preventDefault();
+    setIsDragging(type);
+    const startX = e.clientX;
+    const startSidebarWidth = sidebarWidth;
+    const startListWidth = listWidth;
+
+    const handleMouseMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      if (type === 'sidebar') {
+        const newWidth = Math.max(220, Math.min(500, startSidebarWidth + deltaX));
+        setSidebarWidth(newWidth);
+      } else if (type === 'list') {
+        const newWidth = Math.max(280, Math.min(650, startListWidth + deltaX));
+        setListWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(null);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      try {
+        if (type === 'sidebar') localStorage.setItem('temp_mail_sidebar_width', sidebarWidth.toString());
+        if (type === 'list') localStorage.setItem('temp_mail_list_width', listWidth.toString());
+      } catch (e) {}
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   const checkSession = async () => {
     setCheckingSession(true);
@@ -252,11 +305,9 @@ export default function Home() {
         setUser(data.user);
         setIsImpersonated(!!data.isImpersonated);
         addToast(authMode === 'login' ? 'Welcome back!' : 'Registered successfully!');
-        // Load inboxes if user is approved
         if (data.user?.status === 'approved') {
           fetchInboxes();
         }
-        // Reset auth fields
         setAuthEmail('');
         setAuthPassword('');
       } else {
@@ -282,6 +333,7 @@ export default function Home() {
         setEmails([]);
         setSelectedEmail(null);
         setSelectedEmailIds([]);
+        setIsComposeOpen(false);
         localStorage.removeItem('temp_mail_active_inbox');
         addToast('Logged out successfully.');
       }
@@ -295,7 +347,7 @@ export default function Home() {
       const res = await fetch('/api/admin/impersonate/exit', { method: 'POST' });
       if (res.ok) {
         addToast('Exiting user account view...', 'success');
-        window.location.href = '/admin'; // Redirect back to Admin panel
+        window.location.href = '/admin';
       }
     } catch (err) {
       console.error('Failed to exit impersonation:', err);
@@ -341,7 +393,6 @@ export default function Home() {
         setInboxes((prev) => prev.filter((i) => i.address !== address));
         addToast('Inbox discarded successfully');
         
-        // If we deleted the active inbox, select another one
         if (activeInbox === address) {
           const remaining = inboxes.filter((i) => i.address !== address);
           if (remaining.length > 0) {
@@ -463,7 +514,6 @@ export default function Home() {
   // Single Email Read / Unread toggle
   const handleToggleEmailReadStatus = async (id, isRead) => {
     try {
-      // Optimistic update
       setEmails((prev) =>
         prev.map((em) => (em._id === id ? { ...em, isRead } : em))
       );
@@ -487,6 +537,7 @@ export default function Home() {
 
   // Open email and automatically mark as read
   const handleOpenEmail = async (email) => {
+    setIsComposeOpen(false);
     setSelectedEmail(email);
     setIsReplying(false);
     setReplyBody('');
@@ -554,6 +605,57 @@ export default function Home() {
       addToast('An error occurred while sending reply', 'error');
     } finally {
       setReplySending(false);
+    }
+  };
+
+  // Compose New Email Flow
+  const handleOpenCompose = () => {
+    setComposeFrom(activeInbox || (inboxes[0]?.address || ''));
+    setComposeTo('');
+    setComposeSubject('');
+    setComposeMessage('');
+    setSelectedEmail(null);
+    setIsComposeOpen(true);
+  };
+
+  const handleSendCompose = async (e) => {
+    e.preventDefault();
+    if (!composeFrom || !composeTo.trim() || !composeMessage.trim()) {
+      addToast('Please fill in sender, recipient, and message', 'error');
+      return;
+    }
+    setComposeSending(true);
+
+    try {
+      console.log(`[API Hit]: POST /api/emails/send`);
+      const res = await fetch('/api/emails/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: composeFrom,
+          to: composeTo.trim(),
+          subject: composeSubject.trim(),
+          message: composeMessage.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      console.log(`[API Response]: POST /api/emails/send status=${res.status}`, data);
+
+      if (res.ok && data.success) {
+        addToast(data.message || `Email sent successfully to ${composeTo}! 🚀`, 'success');
+        setIsComposeOpen(false);
+        setComposeTo('');
+        setComposeSubject('');
+        setComposeMessage('');
+      } else {
+        addToast(data.error || 'Failed to send email', 'error');
+      }
+    } catch (err) {
+      console.error('Send email error:', err);
+      addToast('An error occurred while sending email', 'error');
+    } finally {
+      setComposeSending(false);
     }
   };
 
@@ -855,7 +957,17 @@ export default function Home() {
                       )}
                     </div>
                   </div>
-                  <div className="address-actions">
+                  <div className="address-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    <button 
+                      className="btn-primary" 
+                      onClick={handleOpenCompose}
+                      style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                    >
+                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      Compose Mail
+                    </button>
                     {activeInbox && (
                       <button 
                         className="btn-danger" 
@@ -868,507 +980,686 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Dashboard Workspace Grid (Left Sidebar for controls, Right Sidebar for content) */}
-                <div className="main-dashboard-grid">
+                {/* Resizable 3-Column Workspace Layout */}
+                <div className="resizable-workspace-layout">
                   
-                  {/* Left Sidebar: Inbox Generation & Selection */}
-                  <div className="sidebar-pane">
-                    
-                    {/* Inbox Generator Panel */}
-                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div className="pane-header">
-                        <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Create Inbox</h3>
-                      </div>
+                  {/* Column 1: Left Sidebar (Custom resizable width) */}
+                  {!isSidebarCollapsed ? (
+                    <div className="sidebar-pane" style={{ width: `${sidebarWidth}px`, flexShrink: 0 }}>
+                      
+                      {/* Compose Button */}
+                      <button className="btn-compose" onClick={handleOpenCompose}>
+                        <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Compose New Mail
+                      </button>
 
-                      <div className="tab-switcher">
-                        <button 
-                          className={`tab-btn ${!isCustomMode ? 'active' : ''}`}
-                          onClick={() => setIsCustomMode(false)}
-                        >
-                          Random
-                        </button>
-                        <button 
-                          className={`tab-btn ${isCustomMode ? 'active' : ''}`}
-                          onClick={() => setIsCustomMode(true)}
-                        >
-                          Custom
-                        </button>
-                      </div>
-
-                      {!isCustomMode ? (
-                        <button 
-                          className="btn-primary" 
-                          onClick={() => createInbox('random')}
-                          style={{ width: '100%', height: '46px', gap: '0.5rem' }}
-                        >
-                          <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                          </svg>
-                          Generate Random
-                        </button>
-                      ) : (
-                        <form onSubmit={(e) => { e.preventDefault(); createInbox('custom'); }} className="custom-email-form">
-                          <div style={{ display: 'flex', width: '100%' }}>
-                            <input 
-                              type="text" 
-                              className="input-field" 
-                              placeholder="custom.name" 
-                              value={customPrefix}
-                              onChange={(e) => setCustomPrefix(e.target.value)}
-                              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-                            />
-                            <span className="domain-suffix" style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none' }}>
-                              @{DOMAIN}
-                            </span>
-                          </div>
-                          <button type="submit" className="btn-primary" style={{ width: '100%' }}>
-                            Create Address
+                      {/* Inbox Generator Panel */}
+                      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div className="pane-header" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+                          <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Create Inbox</h3>
+                          <button 
+                            className="panel-ctrl-btn" 
+                            onClick={() => setIsSidebarCollapsed(true)}
+                            title="Collapse Sidebar"
+                          >
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                            </svg>
                           </button>
-                        </form>
+                        </div>
+
+                        <div className="tabs-container">
+                          <button 
+                            className={`tab-btn ${!isCustomMode ? 'active' : ''}`}
+                            onClick={() => setIsCustomMode(false)}
+                          >
+                            Random
+                          </button>
+                          <button 
+                            className={`tab-btn ${isCustomMode ? 'active' : ''}`}
+                            onClick={() => setIsCustomMode(true)}
+                          >
+                            Custom
+                          </button>
+                        </div>
+
+                        {!isCustomMode ? (
+                          <button 
+                            className="btn-primary" 
+                            onClick={() => createInbox('random')}
+                            style={{ width: '100%', height: '46px', gap: '0.5rem' }}
+                          >
+                            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Generate Random
+                          </button>
+                        ) : (
+                          <form onSubmit={(e) => { e.preventDefault(); createInbox('custom'); }} className="custom-email-form">
+                            <div style={{ display: 'flex', width: '100%' }}>
+                              <input 
+                                type="text" 
+                                className="input-field" 
+                                placeholder="custom.name" 
+                                value={customPrefix}
+                                onChange={(e) => setCustomPrefix(e.target.value)}
+                                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                              />
+                              <span className="domain-suffix" style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none' }}>
+                                @{DOMAIN}
+                              </span>
+                            </div>
+                            <button type="submit" className="btn-primary" style={{ width: '100%' }}>
+                              Create Address
+                            </button>
+                          </form>
+                        )}
+                      </div>
+
+                      {/* Owned Inboxes list */}
+                      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                        <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>My Inboxes</h3>
+                        
+                        <div className="inbox-list-box">
+                          {inboxesLoading ? (
+                            Array.from({ length: 3 }).map((_, i) => (
+                              <div key={i} className="shimmer shimmer-inbox-item" style={{ marginBottom: '0.6rem' }} />
+                            ))
+                          ) : inboxes.length === 0 ? (
+                            <div style={{ color: 'var(--muted)', fontSize: '0.85rem', padding: '1.25rem 0', textAlign: 'center' }}>
+                              No active temporary inboxes. Generate one above!
+                            </div>
+                          ) : (
+                            inboxes.map((inbox) => {
+                              const isActive = activeInbox === inbox.address;
+                              return (
+                                <div 
+                                  key={inbox._id} 
+                                  className={`inbox-item-row ${isActive ? 'active' : ''}`}
+                                  onClick={() => {
+                                    setActiveInbox(inbox.address);
+                                    localStorage.setItem('temp_mail_active_inbox', inbox.address);
+                                    setSelectedEmail(null);
+                                    setSelectedEmailIds([]);
+                                    setIsReplying(false);
+                                  }}
+                                >
+                                  <span className="inbox-item-address" title={inbox.address}>
+                                    {inbox.address}
+                                  </span>
+                                  <button 
+                                    className="btn-card-delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteInbox(inbox.address);
+                                    }}
+                                    title="Discard Inbox"
+                                    style={{ padding: '0.15rem', marginLeft: '0.4rem' }}
+                                  >
+                                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Collapsed Sidebar Rail */
+                    <div style={{ width: '48px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+                      <button 
+                        className="glass-panel" 
+                        onClick={() => setIsSidebarCollapsed(false)}
+                        title="Expand Sidebar"
+                        style={{ padding: '0.65rem 0.5rem', width: '100%', display: 'flex', justifyContent: 'center', cursor: 'pointer' }}
+                      >
+                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--primary-hover)' }}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                      <button 
+                        className="btn-primary" 
+                        onClick={handleOpenCompose}
+                        title="Compose New Mail"
+                        style={{ width: '40px', height: '40px', padding: 0, borderRadius: '12px' }}
+                      >
+                        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Splitter Resizer 1 (Between Sidebar & Email List) */}
+                  {!isSidebarCollapsed && (
+                    <div 
+                      className={`pane-resizer ${isDragging === 'sidebar' ? 'active' : ''}`} 
+                      onMouseDown={startResizing('sidebar')}
+                      title="Drag horizontally to resize Sidebar"
+                    >
+                      <div className="pane-resizer-line" />
+                    </div>
+                  )}
+
+                  {/* Column 2: Emails List (Custom resizable width) */}
+                  <div className={`glass-panel inbox-list-pane ${selectedEmail || isComposeOpen ? 'hide-mobile-pane' : 'mobile-view-list'}`} style={{ width: `${listWidth}px`, flexShrink: 0 }}>
+                    
+                    {/* Pane Header with Title, Stats & Filter */}
+                    <div className="pane-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 className="pane-title">
+                          Emails
+                          <span className="badge">{emails.length}</span>
+                        </h2>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <button 
+                            className="btn-primary"
+                            onClick={handleOpenCompose}
+                            style={{ padding: '0.25rem 0.65rem', borderRadius: '8px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                            title="Compose new mail"
+                          >
+                            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Compose
+                          </button>
+                          {emails.length > 0 && (
+                            <button 
+                              onClick={() => fetchEmails(true)}
+                              className="btn-secondary" 
+                              style={{ padding: '0.25rem 0.55rem', borderRadius: '8px', fontSize: '0.78rem' }}
+                              title="Manual refresh"
+                            >
+                              Refresh
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Filter Tabs (All / Unread / Read) */}
+                      {emails.length > 0 && (
+                        <div className="email-filter-bar">
+                          <button
+                            className={`email-filter-btn ${emailFilter === 'all' ? 'active' : ''}`}
+                            onClick={() => setEmailFilter('all')}
+                          >
+                            All <span className="email-filter-badge">{emails.length}</span>
+                          </button>
+                          <button
+                            className={`email-filter-btn ${emailFilter === 'unread' ? 'active' : ''}`}
+                            onClick={() => setEmailFilter('unread')}
+                          >
+                            Unread <span className="email-filter-badge" style={{ color: unreadCount > 0 ? '#34d399' : 'inherit', fontWeight: unreadCount > 0 ? 800 : 600 }}>{unreadCount}</span>
+                          </button>
+                          <button
+                            className={`email-filter-btn ${emailFilter === 'read' ? 'active' : ''}`}
+                            onClick={() => setEmailFilter('read')}
+                          >
+                            Read <span className="email-filter-badge">{readCount}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Bulk Actions Toolbar (Active when 1 or more emails are checked) */}
+                      {selectedEmailIds.length > 0 && (
+                        <div className="bulk-actions-toolbar">
+                          <div className="bulk-actions-left">
+                            <div 
+                              className={`custom-checkbox ${selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 ? 'checked' : ''}`}
+                              onClick={handleToggleSelectAll}
+                              title={selectedEmailIds.length === filteredEmails.length ? "Deselect All" : "Select All"}
+                            >
+                              {selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 && (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </div>
+                            <span>{selectedEmailIds.length} Selected</span>
+                          </div>
+                          <div className="bulk-actions-right">
+                            <button 
+                              className="bulk-btn"
+                              onClick={() => handleBulkMarkRead(true)}
+                              title="Mark selected as read"
+                            >
+                              Mark Read
+                            </button>
+                            <button 
+                              className="bulk-btn"
+                              onClick={() => handleBulkMarkRead(false)}
+                              title="Mark selected as unread"
+                            >
+                              Mark Unread
+                            </button>
+                            <button 
+                              className="bulk-btn bulk-btn-danger"
+                              onClick={handleBulkDeleteEmails}
+                              title="Delete selected emails"
+                            >
+                              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Delete ({selectedEmailIds.length})
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    {/* Owned Inboxes list */}
-                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                      <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>My Inboxes</h3>
-                      
-                      <div className="inbox-list-box">
-                        {inboxesLoading ? (
-                          Array.from({ length: 3 }).map((_, i) => (
-                            <div key={i} className="shimmer shimmer-inbox-item" style={{ marginBottom: '0.6rem' }} />
-                          ))
-                        ) : inboxes.length === 0 ? (
-                          <div style={{ color: 'var(--muted)', fontSize: '0.85rem', padding: '1.25rem 0', textAlign: 'center' }}>
-                            No active temporary inboxes. Generate one above!
-                          </div>
-                        ) : (
-                          inboxes.map((inbox) => {
-                            const isActive = activeInbox === inbox.address;
-                            return (
-                              <div 
-                                key={inbox._id} 
-                                className={`inbox-item-row ${isActive ? 'active' : ''}`}
-                                onClick={() => {
-                                  setActiveInbox(inbox.address);
-                                  localStorage.setItem('temp_mail_active_inbox', inbox.address);
-                                  setSelectedEmail(null);
-                                  setSelectedEmailIds([]);
-                                  setIsReplying(false);
-                                }}
-                              >
-                                <span className="inbox-item-address" title={inbox.address}>
-                                  {inbox.address}
-                                </span>
+                    {/* Emails List Body */}
+                    <div className="emails-scroll">
+                      {emailsLoading ? (
+                        Array.from({ length: 3 }).map((_, i) => (
+                          <div key={i} className="shimmer shimmer-card" />
+                        ))
+                      ) : filteredEmails.length === 0 ? (
+                        <div className="empty-state">
+                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 19v-8.93a2 2 0 01.89-1.664l8-5.333a2 2 0 012.22 0l8 5.333A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-2.25-1.5a2 2 0 00-2.22 0l-2.25 1.5" />
+                          </svg>
+                          <h3 style={{ fontSize: '1rem', color: '#fff' }}>
+                            {emailFilter === 'unread' ? 'No Unread Messages' : emailFilter === 'read' ? 'No Read Messages' : 'No Messages Received'}
+                          </h3>
+                          <p style={{ fontSize: '0.8rem' }}>Waiting for emails... refreshes every 5 seconds.</p>
+                        </div>
+                      ) : (
+                        filteredEmails.map((email, idx) => {
+                          const isSelected = selectedEmail && selectedEmail._id === email._id;
+                          const isChecked = selectedEmailIds.includes(email._id);
+                          const isUnread = !email.isRead;
+                          const timeStr = new Date(email.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                          return (
+                            <div 
+                              key={email._id} 
+                              className={`email-card ${isSelected ? 'active' : ''} ${isUnread ? 'unread' : ''}`}
+                              onClick={() => handleOpenEmail(email)}
+                              style={{ animationDelay: `${idx * 0.04}s` }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                {/* Checkbox for bulk selection */}
+                                <div 
+                                  className={`custom-checkbox ${isChecked ? 'checked' : ''}`}
+                                  onClick={(e) => handleToggleSelectEmail(email._id, e)}
+                                  title={isChecked ? "Deselect email" : "Select email"}
+                                  style={{ marginTop: '2px' }}
+                                >
+                                  {isChecked && (
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', flexGrow: 1, minWidth: 0 }}>
+                                  <div className="email-card-header">
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                                      {isUnread && <span className="badge-new-dot" title="Unread email" />}
+                                      <span className="email-card-sender" title={email.from}>{email.from}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+                                      {isUnread && <span className="badge-unread-pill">NEW</span>}
+                                      <span className="email-card-time">{timeStr}</span>
+                                    </div>
+                                  </div>
+                                  <span className="email-card-subject" title={email.subject}>{email.subject}</span>
+                                  <span className="email-card-preview">{email.bodyText || '(HTML message only)'}</span>
+                                </div>
+                              </div>
+
+                              {/* Action Buttons on Card */}
+                              <div className="email-card-actions" style={{ display: 'flex', gap: '0.25rem' }}>
                                 <button 
                                   className="btn-card-delete"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    deleteInbox(inbox.address);
+                                    handleToggleEmailReadStatus(email._id, !email.isRead);
                                   }}
-                                  title="Discard Inbox"
-                                  style={{ padding: '0.15rem', marginLeft: '0.4rem' }}
+                                  title={email.isRead ? "Mark as unread" : "Mark as read"}
+                                >
+                                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                  </svg>
+                                </button>
+                                <button 
+                                  className="btn-card-delete"
+                                  onClick={(e) => deleteSingleEmail(email._id, e)}
+                                  title="Delete Email"
                                 >
                                   <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                   </svg>
                                 </button>
                               </div>
-                            );
-                          })
-                        )}
-                      </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
 
-                  {/* Right Content Pane: Emails grid split pane */}
-                  <div className="content-pane">
-                    {activeInbox ? (
-                      <div className="dashboard-grid">
-                        
-                        {/* Emails List */}
-                        <div className={`glass-panel inbox-list-pane ${selectedEmail ? 'hide-mobile-pane' : 'mobile-view-list'}`}>
-                          
-                          {/* Pane Header with Title, Stats & Action */}
-                          <div className="pane-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.75rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <h2 className="pane-title">
-                                Emails
-                                <span className="badge">{emails.length}</span>
-                              </h2>
-                              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                {emails.length > 0 && (
-                                  <button 
-                                    onClick={() => fetchEmails(true)}
-                                    className="btn-secondary" 
-                                    style={{ padding: '0.25rem 0.55rem', borderRadius: '8px', fontSize: '0.78rem' }}
-                                    title="Manual refresh"
-                                  >
-                                    Refresh
-                                  </button>
-                                )}
-                              </div>
+                  {/* Splitter Resizer 2 (Between Email List & Reader/Composer) */}
+                  <div 
+                    className={`pane-resizer ${isDragging === 'list' ? 'active' : ''}`} 
+                    onMouseDown={startResizing('list')}
+                    title="Drag horizontally to resize Reader width"
+                  >
+                    <div className="pane-resizer-line" />
+                  </div>
+
+                  {/* Column 3: Email Reader OR New Email Composer (Flex 1 - Takes remaining space) */}
+                  <div className="content-pane" style={{ flexGrow: 1, minWidth: '320px' }}>
+                    {isComposeOpen ? (
+                      /* Compose New Email Panel */
+                      <div className="glass-panel compose-card">
+                        <div className="compose-header">
+                          <div className="compose-title">
+                            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--primary-hover)' }}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Compose New Email
+                          </div>
+                          <button 
+                            className="panel-ctrl-btn"
+                            onClick={() => setIsComposeOpen(false)}
+                            title="Close Composer"
+                          >
+                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+
+                        <form onSubmit={handleSendCompose} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', flexGrow: 1 }}>
+                          <div className="compose-field-group">
+                            {/* Sender From Select */}
+                            <div className="compose-field-row">
+                              <span className="compose-field-label">From:</span>
+                              <select 
+                                className="compose-select"
+                                value={composeFrom}
+                                onChange={(e) => setComposeFrom(e.target.value)}
+                                required
+                              >
+                                {inboxes.map((ib) => (
+                                  <option key={ib._id} value={ib.address}>
+                                    {ib.address}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
 
-                            {/* Filter Tabs (All / Unread / Read) */}
-                            {emails.length > 0 && (
-                              <div className="email-filter-bar">
-                                <button
-                                  className={`email-filter-btn ${emailFilter === 'all' ? 'active' : ''}`}
-                                  onClick={() => setEmailFilter('all')}
-                                >
-                                  All <span className="email-filter-badge">{emails.length}</span>
-                                </button>
-                                <button
-                                  className={`email-filter-btn ${emailFilter === 'unread' ? 'active' : ''}`}
-                                  onClick={() => setEmailFilter('unread')}
-                                >
-                                  Unread <span className="email-filter-badge" style={{ color: unreadCount > 0 ? '#34d399' : 'inherit', fontWeight: unreadCount > 0 ? 800 : 600 }}>{unreadCount}</span>
-                                </button>
-                                <button
-                                  className={`email-filter-btn ${emailFilter === 'read' ? 'active' : ''}`}
-                                  onClick={() => setEmailFilter('read')}
-                                >
-                                  Read <span className="email-filter-badge">{readCount}</span>
-                                </button>
-                              </div>
-                            )}
+                            {/* Recipient To Input */}
+                            <div className="compose-field-row">
+                              <span className="compose-field-label">To:</span>
+                              <input 
+                                type="email"
+                                className="compose-field-input"
+                                placeholder="recipient@example.com"
+                                value={composeTo}
+                                onChange={(e) => setComposeTo(e.target.value)}
+                                required
+                                autoFocus
+                              />
+                            </div>
 
-                            {/* Bulk Actions Toolbar (Active when 1 or more emails are checked) */}
-                            {selectedEmailIds.length > 0 && (
-                              <div className="bulk-actions-toolbar">
-                                <div className="bulk-actions-left">
-                                  <div 
-                                    className={`custom-checkbox ${selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 ? 'checked' : ''}`}
-                                    onClick={handleToggleSelectAll}
-                                    title={selectedEmailIds.length === filteredEmails.length ? "Deselect All" : "Select All"}
-                                  >
-                                    {selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 && (
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                      </svg>
-                                    )}
-                                  </div>
-                                  <span>{selectedEmailIds.length} Selected</span>
-                                </div>
-                                <div className="bulk-actions-right">
-                                  <button 
-                                    className="bulk-btn"
-                                    onClick={() => handleBulkMarkRead(true)}
-                                    title="Mark selected as read"
-                                  >
-                                    Mark Read
-                                  </button>
-                                  <button 
-                                    className="bulk-btn"
-                                    onClick={() => handleBulkMarkRead(false)}
-                                    title="Mark selected as unread"
-                                  >
-                                    Mark Unread
-                                  </button>
-                                  <button 
-                                    className="bulk-btn bulk-btn-danger"
-                                    onClick={handleBulkDeleteEmails}
-                                    title="Delete selected emails"
-                                  >
-                                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                    Delete ({selectedEmailIds.length})
-                                  </button>
-                                </div>
-                              </div>
-                            )}
+                            {/* Subject Input */}
+                            <div className="compose-field-row">
+                              <span className="compose-field-label">Subject:</span>
+                              <input 
+                                type="text"
+                                className="compose-field-input"
+                                placeholder="Subject"
+                                value={composeSubject}
+                                onChange={(e) => setComposeSubject(e.target.value)}
+                              />
+                            </div>
                           </div>
 
-                          {/* Emails List Body */}
-                          <div className="emails-scroll">
-                            {emailsLoading ? (
-                              Array.from({ length: 3 }).map((_, i) => (
-                                <div key={i} className="shimmer shimmer-card" />
-                              ))
-                            ) : filteredEmails.length === 0 ? (
-                              <div className="empty-state">
-                                <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 19v-8.93a2 2 0 01.89-1.664l8-5.333a2 2 0 012.22 0l8 5.333A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-2.25-1.5a2 2 0 00-2.22 0l-2.25 1.5" />
-                                </svg>
-                                <h3 style={{ fontSize: '1rem', color: '#fff' }}>
-                                  {emailFilter === 'unread' ? 'No Unread Messages' : emailFilter === 'read' ? 'No Read Messages' : 'No Messages Received'}
-                                </h3>
-                                <p style={{ fontSize: '0.8rem' }}>Waiting for emails... refreshes every 5 seconds.</p>
-                              </div>
-                            ) : (
-                              filteredEmails.map((email, idx) => {
-                                const isSelected = selectedEmail && selectedEmail._id === email._id;
-                                const isChecked = selectedEmailIds.includes(email._id);
-                                const isUnread = !email.isRead;
-                                const timeStr = new Date(email.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          {/* Message Body Textarea */}
+                          <textarea 
+                            className="compose-textarea"
+                            placeholder="Type your email message here..."
+                            value={composeMessage}
+                            onChange={(e) => setComposeMessage(e.target.value)}
+                            required
+                          />
 
-                                return (
-                                  <div 
-                                    key={email._id} 
-                                    className={`email-card ${isSelected ? 'active' : ''} ${isUnread ? 'unread' : ''}`}
-                                    onClick={() => handleOpenEmail(email)}
-                                    style={{ animationDelay: `${idx * 0.04}s` }}
-                                  >
-                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                                      {/* Checkbox for bulk selection */}
-                                      <div 
-                                        className={`custom-checkbox ${isChecked ? 'checked' : ''}`}
-                                        onClick={(e) => handleToggleSelectEmail(email._id, e)}
-                                        title={isChecked ? "Deselect email" : "Select email"}
-                                        style={{ marginTop: '2px' }}
-                                      >
-                                        {isChecked && (
-                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                          </svg>
-                                        )}
-                                      </div>
+                          {/* Action Buttons */}
+                          <div className="compose-actions">
+                            <button 
+                              type="button" 
+                              className="btn-secondary" 
+                              onClick={() => setIsComposeOpen(false)}
+                              style={{ padding: '0.5rem 1.25rem', borderRadius: '10px' }}
+                            >
+                              Discard
+                            </button>
+                            <button 
+                              type="submit" 
+                              className="btn-primary" 
+                              disabled={composeSending}
+                              style={{ padding: '0.5rem 1.5rem', borderRadius: '10px', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                            >
+                              {composeSending ? (
+                                <>
+                                  <div className="loader-small" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                                  Sending...
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                  </svg>
+                                  Send Email
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    ) : selectedEmail ? (
+                      /* Email Reader View */
+                      <div className={`glass-panel email-reader-pane ${selectedEmail ? 'mobile-view-reader' : 'hide-mobile-pane'}`}>
+                        {/* Back to list button for mobile */}
+                        <button className="btn-back-mobile" onClick={() => setSelectedEmail(null)}>
+                          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                          </svg>
+                          Back to Inbox
+                        </button>
 
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', flexGrow: 1, minWidth: 0 }}>
-                                        <div className="email-card-header">
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
-                                            {isUnread && <span className="badge-new-dot" title="Unread email" />}
-                                            <span className="email-card-sender" title={email.from}>{email.from}</span>
-                                          </div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
-                                            {isUnread && <span className="badge-unread-pill">NEW</span>}
-                                            <span className="email-card-time">{timeStr}</span>
-                                          </div>
-                                        </div>
-                                        <span className="email-card-subject" title={email.subject}>{email.subject}</span>
-                                        <span className="email-card-preview">{email.bodyText || '(HTML message only)'}</span>
-                                      </div>
-                                    </div>
-
-                                    {/* Action Buttons on Card */}
-                                    <div className="email-card-actions" style={{ display: 'flex', gap: '0.25rem' }}>
-                                      <button 
-                                        className="btn-card-delete"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleToggleEmailReadStatus(email._id, !email.isRead);
-                                        }}
-                                        title={email.isRead ? "Mark as unread" : "Mark as read"}
-                                      >
-                                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                        </svg>
-                                      </button>
-                                      <button 
-                                        className="btn-card-delete"
-                                        onClick={(e) => deleteSingleEmail(email._id, e)}
-                                        title="Delete Email"
-                                      >
-                                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            )}
+                        <div className="reader-header">
+                          <div className="reader-meta">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                              <h2 className="reader-subject">{selectedEmail.subject}</h2>
+                              {!selectedEmail.isRead && (
+                                <span className="badge-unread-pill">NEW</span>
+                              )}
+                            </div>
+                            <div className="reader-from">
+                              From: <span>{selectedEmail.from}</span>
+                            </div>
+                            <div className="reader-to">
+                              To: {selectedEmail.to}
+                            </div>
+                            <div className="reader-date">
+                              Received: {new Date(selectedEmail.createdAt).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="reader-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button 
+                              className="btn-primary" 
+                              onClick={handleStartReply}
+                              style={{ padding: '0.4rem 0.95rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', borderRadius: '10px' }}
+                            >
+                              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
+                              </svg>
+                              Reply
+                            </button>
+                            <button 
+                              className="btn-secondary" 
+                              onClick={() => handleToggleEmailReadStatus(selectedEmail._id, !selectedEmail.isRead)}
+                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
+                            >
+                              {selectedEmail.isRead ? 'Mark Unread' : 'Mark Read'}
+                            </button>
+                            <button 
+                              className="btn-danger" 
+                              onClick={() => deleteSingleEmail(selectedEmail._id)}
+                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
+                            >
+                              Delete
+                            </button>
                           </div>
                         </div>
 
-                        {/* Email Reader */}
-                        <div className={`glass-panel email-reader-pane ${selectedEmail ? 'mobile-view-reader' : 'hide-mobile-pane'}`}>
-                          {selectedEmail ? (
-                            <>
-                              {/* Back to list button for mobile */}
-                              <button className="btn-back-mobile" onClick={() => setSelectedEmail(null)}>
-                                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                                </svg>
-                                Back to Inbox
-                              </button>
-
-                              <div className="reader-header">
-                                <div className="reader-meta">
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-                                    <h2 className="reader-subject">{selectedEmail.subject}</h2>
-                                    {!selectedEmail.isRead && (
-                                      <span className="badge-unread-pill">NEW</span>
-                                    )}
-                                  </div>
-                                  <div className="reader-from">
-                                    From: <span>{selectedEmail.from}</span>
-                                  </div>
-                                  <div className="reader-to">
-                                    To: {selectedEmail.to}
-                                  </div>
-                                  <div className="reader-date">
-                                    Received: {new Date(selectedEmail.createdAt).toLocaleString()}
-                                  </div>
-                                </div>
-                                <div className="reader-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                  <button 
-                                    className="btn-primary" 
-                                    onClick={handleStartReply}
-                                    style={{ padding: '0.4rem 0.95rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', borderRadius: '10px' }}
-                                  >
-                                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
-                                    </svg>
-                                    Reply
-                                  </button>
-                                  <button 
-                                    className="btn-secondary" 
-                                    onClick={() => handleToggleEmailReadStatus(selectedEmail._id, !selectedEmail.isRead)}
-                                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
-                                  >
-                                    {selectedEmail.isRead ? 'Mark Unread' : 'Mark Read'}
-                                  </button>
-                                  <button 
-                                    className="btn-danger" 
-                                    onClick={() => deleteSingleEmail(selectedEmail._id)}
-                                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Reader Body */}
-                              <div className="reader-body-wrapper">
-                                {selectedEmail.bodyHtml ? (
-                                  (() => {
-                                    const cleanedHtml = selectedEmail.bodyHtml
-                                      .replace(/<a\s+/gi, '<a target="_blank" rel="noopener noreferrer" ')
-                                      .replace(/target="_self"/gi, '')
-                                      .replace(/target="_parent"/gi, '')
-                                      .replace(/target="_top"/gi, '');
-                                    
-                                    return (
-                                      <iframe 
-                                        className="reader-body-iframe"
-                                        title="Email Body HTML"
-                                        sandbox="allow-popups allow-popups-to-escape-sandbox"
-                                        srcDoc={`
-                                          <!DOCTYPE html>
-                                          <html>
-                                            <head>
-                                              <style>
-                                                body {
-                                                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                                                  font-size: 14px;
-                                                  line-height: 1.6;
-                                                  color: #333333;
-                                                  margin: 16px;
-                                                  word-break: break-word;
-                                                }
-                                                img { max-width: 100%; height: auto; }
-                                              </style>
-                                            </head>
-                                            <body>
-                                              ${cleanedHtml}
-                                            </body>
-                                          </html>
-                                        `}
-                                      />
-                                    );
-                                  })()
-                                ) : (
-                                  <div className="reader-body-text">
-                                    {selectedEmail.bodyText || '(No text content available)'}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Reply Message Composer Form */}
-                              {isReplying && (
-                                <div className="reader-reply-card">
-                                  <div className="reader-reply-header">
-                                    <div className="reader-reply-title">
-                                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--primary-hover)' }}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
-                                      </svg>
-                                      Reply Message
-                                    </div>
-                                    <button 
-                                      onClick={() => setIsReplying(false)}
-                                      style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '0.2rem' }}
-                                      title="Close reply composer"
-                                    >
-                                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                      </svg>
-                                    </button>
-                                  </div>
-
-                                  <div className="reader-reply-meta">
-                                    <div>From: <strong>{activeInbox}</strong></div>
-                                    <div>To: <strong>{replyRecipient}</strong></div>
-                                    <div>Subject: <strong>{replySubject}</strong></div>
-                                  </div>
-
-                                  {selectedEmail.bodyText && (
-                                    <div className="reader-reply-quote-preview">
-                                      <strong>Quoted:</strong> {selectedEmail.bodyText.substring(0, 180)}...
-                                    </div>
-                                  )}
-
-                                  <form onSubmit={handleSendReply} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                    <textarea
-                                      className="reader-reply-textarea"
-                                      placeholder="Type your reply message here..."
-                                      value={replyBody}
-                                      onChange={(e) => setReplyBody(e.target.value)}
-                                      required
-                                      autoFocus
-                                    />
-                                    <div className="reader-reply-actions">
-                                      <button 
-                                        type="button" 
-                                        className="btn-secondary" 
-                                        onClick={() => setIsReplying(false)}
-                                        style={{ padding: '0.45rem 1rem', fontSize: '0.82rem', borderRadius: '10px' }}
-                                      >
-                                        Cancel
-                                      </button>
-                                      <button 
-                                        type="submit" 
-                                        className="btn-primary" 
-                                        disabled={replySending}
-                                        style={{ padding: '0.45rem 1.25rem', fontSize: '0.82rem', borderRadius: '10px', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
-                                      >
-                                        {replySending ? (
-                                          <>
-                                            <div className="loader-small" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
-                                            Sending...
-                                          </>
-                                        ) : (
-                                          <>
-                                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                            </svg>
-                                            Send Reply
-                                          </>
-                                        )}
-                                      </button>
-                                    </div>
-                                  </form>
-                                </div>
-                              )}
-                            </>
+                        {/* Reader Body */}
+                        <div className="reader-body-wrapper">
+                          {selectedEmail.bodyHtml ? (
+                            (() => {
+                              const cleanedHtml = selectedEmail.bodyHtml
+                                .replace(/<a\s+/gi, '<a target="_blank" rel="noopener noreferrer" ')
+                                .replace(/target="_self"/gi, '')
+                                .replace(/target="_parent"/gi, '')
+                                .replace(/target="_top"/gi, '');
+                              
+                              return (
+                                <iframe 
+                                  className="reader-body-iframe"
+                                  title="Email Body HTML"
+                                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                                  srcDoc={`
+                                    <!DOCTYPE html>
+                                    <html>
+                                      <head>
+                                        <style>
+                                          body {
+                                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                                            font-size: 14px;
+                                            line-height: 1.6;
+                                            color: #333333;
+                                            margin: 16px;
+                                            word-break: break-word;
+                                          }
+                                          img { max-width: 100%; height: auto; }
+                                        </style>
+                                      </head>
+                                      <body>
+                                        ${cleanedHtml}
+                                      </body>
+                                    </html>
+                                  `}
+                                />
+                              );
+                            })()
                           ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '350px', color: 'var(--muted)', gap: '0.5rem' }}>
-                              <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="0.75">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                              </svg>
-                              <p style={{ fontSize: '0.9rem' }}>Select an email from the left pane to view its content.</p>
+                            <div className="reader-body-text">
+                              {selectedEmail.bodyText || '(No text content available)'}
                             </div>
                           )}
                         </div>
+
+                        {/* Reply Message Composer Form */}
+                        {isReplying && (
+                          <div className="reader-reply-card">
+                            <div className="reader-reply-header">
+                              <div className="reader-reply-title">
+                                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--primary-hover)' }}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
+                                </svg>
+                                Reply Message
+                              </div>
+                              <button 
+                                onClick={() => setIsReplying(false)}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '0.2rem' }}
+                                title="Close reply composer"
+                              >
+                                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+
+                            <div className="reader-reply-meta">
+                              <div>From: <strong>{activeInbox}</strong></div>
+                              <div>To: <strong>{replyRecipient}</strong></div>
+                              <div>Subject: <strong>{replySubject}</strong></div>
+                            </div>
+
+                            {selectedEmail.bodyText && (
+                              <div className="reader-reply-quote-preview">
+                                <strong>Quoted:</strong> {selectedEmail.bodyText.substring(0, 180)}...
+                              </div>
+                            )}
+
+                            <form onSubmit={handleSendReply} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                              <textarea 
+                                className="reader-reply-textarea"
+                                placeholder="Type your reply message here..."
+                                value={replyBody}
+                                onChange={(e) => setReplyBody(e.target.value)}
+                                required
+                                autoFocus
+                              />
+                              <div className="reader-reply-actions">
+                                <button 
+                                  type="button" 
+                                  className="btn-secondary" 
+                                  onClick={() => setIsReplying(false)}
+                                  style={{ padding: '0.45rem 1rem', fontSize: '0.82rem', borderRadius: '10px' }}
+                                >
+                                  Cancel
+                                </button>
+                                <button 
+                                  type="submit" 
+                                  className="btn-primary" 
+                                  disabled={replySending}
+                                  style={{ padding: '0.45rem 1.25rem', fontSize: '0.82rem', borderRadius: '10px', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                                >
+                                  {replySending ? (
+                                    <>
+                                      <div className="loader-small" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                                      Sending...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                      </svg>
+                                      Send Reply
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        )}
                       </div>
                     ) : (
-                      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '350px', color: 'var(--muted)', gap: '0.75rem', textAlign: 'center', height: '100%' }}>
-                        <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="0.75">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      /* Empty State View */
+                      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '480px', color: 'var(--muted)', gap: '0.75rem', textAlign: 'center' }}>
+                        <svg width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="0.75">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                         </svg>
-                        <h3 style={{ color: '#fff' }}>No Active Inbox</h3>
-                        <p style={{ fontSize: '0.9rem' }}>Generate a random email or create a custom prefix above to start receiving mails.</p>
+                        <h3 style={{ color: '#fff', fontSize: '1.1rem' }}>No Email Selected</h3>
+                        <p style={{ fontSize: '0.85rem', maxWidth: '320px' }}>
+                          Select an email from the list to view its contents, or click <strong>Compose</strong> to write a new email.
+                        </p>
+                        <button 
+                          className="btn-primary" 
+                          onClick={handleOpenCompose}
+                          style={{ marginTop: '0.5rem', padding: '0.45rem 1.25rem', fontSize: '0.85rem' }}
+                        >
+                          Compose Mail
+                        </button>
                       </div>
                     )}
                   </div>
