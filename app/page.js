@@ -135,11 +135,11 @@ export default function Home() {
     };
   }, [activeTab]);
 
-  // 4. Listen to email iframe height events to auto-expand reader pane
+  // 4. Listen to email iframe height events to precisely fit email content
   useEffect(() => {
     const handleIframeMessage = (event) => {
       if (event.data && event.data.type === 'EMAIL_IFRAME_HEIGHT' && typeof event.data.height === 'number') {
-        const measured = Math.max(550, Math.ceil(event.data.height) + 30);
+        const measured = Math.max(180, Math.ceil(event.data.height));
         setIframeHeight(measured);
       }
     };
@@ -148,7 +148,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    setIframeHeight(650);
+    setIframeHeight(300);
   }, [selectedEmail?._id]);
 
   // Pane Resizing Drag Handlers
@@ -1555,7 +1555,7 @@ export default function Home() {
                                   className="reader-body-iframe"
                                   title="Email Body HTML"
                                   sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"
-                                  style={{ height: `${iframeHeight}px`, minHeight: '600px' }}
+                                  style={{ height: `${iframeHeight}px` }}
                                   srcDoc={`
                                     <!DOCTYPE html>
                                     <html>
@@ -1565,42 +1565,52 @@ export default function Home() {
                                         <style>
                                           html, body {
                                             margin: 0;
-                                            padding: 16px;
+                                            padding: 0;
+                                            background: #ffffff;
+                                            height: auto !important;
+                                            min-height: 0 !important;
+                                            overflow: hidden !important;
                                             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                                             font-size: 14px;
                                             line-height: 1.6;
                                             color: #333333;
-                                            background: #ffffff;
-                                            word-break: break-word;
+                                          }
+                                          #email-content-wrapper {
+                                            padding: 16px;
+                                            margin: 0;
+                                            box-sizing: border-box;
+                                            display: flow-root;
+                                            width: 100%;
                                           }
                                           img { max-width: 100%; height: auto; display: block; }
                                           table { max-width: 100% !important; }
                                         </style>
                                       </head>
                                       <body>
-                                        ${cleanedHtml}
+                                        <div id="email-content-wrapper">
+                                          ${cleanedHtml}
+                                        </div>
                                         <script>
+                                          var lastHeight = 0;
                                           function reportHeight() {
                                             try {
-                                              var body = document.body;
-                                              var html = document.documentElement;
-                                              if (!body) return;
-                                              var height = Math.max(
-                                                body.scrollHeight, body.offsetHeight,
-                                                html.clientHeight, html.scrollHeight, html.offsetHeight
-                                              );
-                                              window.parent.postMessage({ type: 'EMAIL_IFRAME_HEIGHT', height: height }, '*');
+                                              var el = document.getElementById('email-content-wrapper');
+                                              if (!el) return;
+                                              var h = Math.ceil(el.getBoundingClientRect().height);
+                                              if (h > 40 && Math.abs(h - lastHeight) > 2) {
+                                                lastHeight = h;
+                                                window.parent.postMessage({ type: 'EMAIL_IFRAME_HEIGHT', height: h }, '*');
+                                              }
                                             } catch(e) {}
                                           }
                                           window.addEventListener('load', reportHeight);
-                                          window.addEventListener('resize', reportHeight);
                                           document.addEventListener('DOMContentLoaded', reportHeight);
-                                          setTimeout(reportHeight, 150);
-                                          setTimeout(reportHeight, 500);
-                                          setTimeout(reportHeight, 1200);
-                                          setTimeout(reportHeight, 2500);
+                                          setTimeout(reportHeight, 50);
+                                          setTimeout(reportHeight, 250);
+                                          setTimeout(reportHeight, 700);
+                                          setTimeout(reportHeight, 1500);
                                           if (window.ResizeObserver) {
-                                            new ResizeObserver(reportHeight).observe(document.body);
+                                            new ResizeObserver(reportHeight).observe(document.getElementById('email-content-wrapper') || document.body);
                                           }
                                         </script>
                                       </body>
