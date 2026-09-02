@@ -1441,10 +1441,47 @@ export default function Home() {
                             </div>
                           </div>
 
+                          {/* Formatting Toolbar */}
+                          <div className="compose-toolbar">
+                            <span style={{ fontSize: '0.72rem', color: 'var(--muted)', marginRight: '0.35rem', fontWeight: 600 }}>Format:</span>
+                            <button
+                              type="button"
+                              className="compose-toolbar-btn"
+                              onClick={() => setComposeMessage((prev) => prev + '**Bold Text**')}
+                              title="Bold text"
+                            >
+                              <strong>B</strong>
+                            </button>
+                            <button
+                              type="button"
+                              className="compose-toolbar-btn"
+                              onClick={() => setComposeMessage((prev) => prev + '*Italic Text*')}
+                              title="Italic text"
+                            >
+                              <em>I</em>
+                            </button>
+                            <button
+                              type="button"
+                              className="compose-toolbar-btn"
+                              onClick={() => setComposeMessage((prev) => prev + '`code snippet`')}
+                              title="Code / Highlight"
+                            >
+                              &lt;/&gt;
+                            </button>
+                            <button
+                              type="button"
+                              className="compose-toolbar-btn"
+                              onClick={() => setComposeMessage((prev) => prev + '\n• Point 1\n• Point 2\n')}
+                              title="Bullet list"
+                            >
+                              • List
+                            </button>
+                          </div>
+
                           {/* Message Body Textarea */}
                           <textarea 
                             className="compose-textarea"
-                            placeholder="Type your email message here..."
+                            placeholder="Type your email message here... (Supports **bold**, *italic*, and `code`)"
                             value={composeMessage}
                             onChange={(e) => setComposeMessage(e.target.value)}
                             required
@@ -1660,9 +1697,46 @@ export default function Home() {
                             )}
 
                             <form onSubmit={handleSendReply} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                              {/* Formatting Toolbar */}
+                              <div className="compose-toolbar" style={{ margin: 0 }}>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--muted)', marginRight: '0.35rem', fontWeight: 600 }}>Format:</span>
+                                <button
+                                  type="button"
+                                  className="compose-toolbar-btn"
+                                  onClick={() => setReplyBody((prev) => prev + '**Bold Text**')}
+                                  title="Bold text"
+                                >
+                                  <strong>B</strong>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="compose-toolbar-btn"
+                                  onClick={() => setReplyBody((prev) => prev + '*Italic Text*')}
+                                  title="Italic text"
+                                >
+                                  <em>I</em>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="compose-toolbar-btn"
+                                  onClick={() => setReplyBody((prev) => prev + '`code snippet`')}
+                                  title="Code / Highlight"
+                                >
+                                  &lt;/&gt;
+                                </button>
+                                <button
+                                  type="button"
+                                  className="compose-toolbar-btn"
+                                  onClick={() => setReplyBody((prev) => prev + '\n• Point 1\n• Point 2\n')}
+                                  title="Bullet list"
+                                >
+                                  • List
+                                </button>
+                              </div>
+
                               <textarea 
                                 className="reader-reply-textarea"
-                                placeholder="Type your reply message here..."
+                                placeholder="Type your reply message here... (Supports **bold**, *italic*, and `code`)"
                                 value={replyBody}
                                 onChange={(e) => setReplyBody(e.target.value)}
                                 required
