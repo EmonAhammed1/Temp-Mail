@@ -21,6 +21,17 @@ export default function AdminDashboard() {
   const [autoApprove, setAutoApprove] = useState(false);
   const [togglingAutoApprove, setTogglingAutoApprove] = useState(false);
 
+  // Outbound SMTP setting state
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [isSmtpConfigured, setIsSmtpConfigured] = useState(false);
+  const [savingSmtp, setSavingSmtp] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+
   // Toast notifications state
   const [toasts, setToasts] = useState([]);
 
@@ -30,7 +41,7 @@ export default function AdminDashboard() {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
+    }, 4500);
   };
 
   // Check admin session on mount
@@ -64,6 +75,14 @@ export default function AdminDashboard() {
         const data = await res.json();
         if (data.success && data.settings) {
           setAutoApprove(Boolean(data.settings.autoApprove));
+          if (data.settings.smtpConfig) {
+            setSmtpHost(data.settings.smtpConfig.host || '');
+            setSmtpPort(data.settings.smtpConfig.port || 587);
+            setSmtpUser(data.settings.smtpConfig.user || '');
+            setSmtpPass(data.settings.smtpConfig.pass || '');
+            setSmtpSecure(Boolean(data.settings.smtpConfig.secure));
+            setIsSmtpConfigured(Boolean(data.settings.smtpConfig.isConfigured));
+          }
         }
       }
     } catch (err) {
@@ -103,6 +122,71 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSaveSmtp = async (e) => {
+    e.preventDefault();
+    setSavingSmtp(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          smtpConfig: {
+            host: smtpHost,
+            port: smtpPort,
+            user: smtpUser,
+            pass: smtpPass,
+            secure: smtpSecure,
+          }
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsSmtpConfigured(Boolean(smtpHost && smtpUser));
+        addToast('SMTP mail server settings saved successfully! 🚀', 'success');
+      } else {
+        addToast(data.error || 'Failed to save SMTP settings', 'error');
+      }
+    } catch (err) {
+      addToast('An error occurred while saving SMTP', 'error');
+    } finally {
+      setSavingSmtp(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    if (!testEmail || !testEmail.trim()) {
+      addToast('Please enter a test recipient email address', 'error');
+      return;
+    }
+    setTestingSmtp(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          testEmail: testEmail.trim(),
+          smtpConfig: {
+            host: smtpHost,
+            port: smtpPort,
+            user: smtpUser,
+            pass: smtpPass,
+            secure: smtpSecure,
+          }
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addToast(data.message || 'Test email sent successfully! 🚀', 'success');
+      } else {
+        addToast(data.error || 'SMTP Test Failed', 'error');
+      }
+    } catch (err) {
+      addToast('An error occurred during SMTP test', 'error');
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
+
   const handleAdminLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
@@ -118,7 +202,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok && data.success) {
         setIsAdminAuthenticated(true);
-        addToast('Welcome Admin!', 'success');
+        addToast('Admin login successful!');
         fetchUsers();
         fetchSettings();
       } else {
@@ -126,25 +210,20 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.error(err);
-      setLoginError('An error occurred during admin login');
+      setLoginError('An error occurred during login');
     } finally {
       setLoginLoading(false);
     }
   };
 
   const handleAdminLogout = async () => {
-    if (!confirm('Are you sure you want to log out from Admin Panel?')) return;
     try {
-      const res = await fetch('/api/admin/auth/logout', { method: 'POST' });
-      if (res.ok) {
-        setIsAdminAuthenticated(false);
-        setUsers([]);
-        setUsername('');
-        setPassword('');
-        addToast('Admin logged out successfully.', 'success');
-      }
+      await fetch('/api/admin/auth/logout', { method: 'POST' });
+      setIsAdminAuthenticated(false);
+      setUsers([]);
+      addToast('Logged out of Admin Portal');
     } catch (err) {
-      console.error('Admin logout failed:', err);
+      console.error('Logout error:', err);
     }
   };
 
@@ -153,14 +232,12 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/users');
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setUsers(data.users || []);
-      } else {
-        addToast('Failed to fetch users', 'error');
       }
     } catch (err) {
-      console.error(err);
-      addToast('An error occurred while fetching users', 'error');
+      console.error('Failed to load users:', err);
+      addToast('Failed to load users list', 'error');
     } finally {
       setUsersLoading(false);
     }
@@ -169,7 +246,7 @@ export default function AdminDashboard() {
   const updateUserStatus = async (userId, newStatus) => {
     try {
       const res = await fetch('/api/admin/users', {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, status: newStatus }),
       });
@@ -177,36 +254,35 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok && data.success) {
         setUsers((prev) =>
-          prev.map((user) => (user._id === userId ? { ...user, status: newStatus } : user))
+          prev.map((u) => (u._id === userId ? { ...u, status: newStatus } : u))
         );
-        addToast(`User status updated to ${newStatus}`, 'success');
+        addToast(`User marked as ${newStatus}`);
       } else {
-        addToast(data.error || 'Failed to update user status', 'error');
+        addToast(data.error || 'Failed to update user', 'error');
       }
     } catch (err) {
-      console.error(err);
-      addToast('An error occurred while updating status', 'error');
+      console.error('Update status error:', err);
+      addToast('An error occurred', 'error');
     }
   };
 
-  const deleteUser = async (userId, email) => {
-    if (!confirm(`Are you absolutely sure you want to permanently delete user "${email}"?\nThis will delete their account, all inboxes, and all received emails.`)) return;
+  const deleteUser = async (userId, userEmail) => {
+    if (!confirm(`Are you sure you want to permanently delete user:\n${userEmail}?\nAll their associated inboxes and emails will be destroyed.`)) {
+      return;
+    }
 
     try {
-      const res = await fetch(`/api/admin/users?id=${userId}`, {
-        method: 'DELETE',
-      });
-
+      const res = await fetch(`/api/admin/users?id=${userId}`, { method: 'DELETE' });
       const data = await res.json();
       if (res.ok && data.success) {
-        setUsers((prev) => prev.filter((user) => user._id !== userId));
-        addToast('User permanently deleted', 'success');
+        setUsers((prev) => prev.filter((u) => u._id !== userId));
+        addToast(`User ${userEmail} deleted successfully`);
       } else {
         addToast(data.error || 'Failed to delete user', 'error');
       }
     } catch (err) {
-      console.error(err);
-      addToast('An error occurred while deleting user', 'error');
+      console.error('Delete user error:', err);
+      addToast('An error occurred', 'error');
     }
   };
 
@@ -220,140 +296,118 @@ export default function AdminDashboard() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        addToast('Entering user account view...', 'success');
+        addToast('Opening user workspace...', 'success');
         window.location.href = '/';
       } else {
-        addToast(data.error || 'Failed to enter user account', 'error');
+        addToast(data.error || 'Failed to impersonate user', 'error');
       }
     } catch (err) {
-      console.error(err);
+      console.error('Impersonate error:', err);
       addToast('An error occurred during impersonation', 'error');
     }
   };
 
-  // Stats calculation
-  const totalUsers = users.length;
-  const pendingApprovals = users.filter((u) => u.status === 'pending').length;
-  const activeUsers = users.filter((u) => u.status === 'approved').length;
-
-  // Filter users by search query
+  // Filter users based on query
   const filteredUsers = users.filter((u) =>
-    u.email.toLowerCase().includes(searchQuery.toLowerCase().trim())
+    u.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Initial loader
+  const pendingCount = users.filter((u) => u.status === 'pending').length;
+  const approvedCount = users.filter((u) => u.status === 'approved').length;
+
   if (checkingSession) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', gap: '1.5rem', background: '#060608', color: '#fff' }}>
         <div className="loader-small" style={{ width: '40px', height: '40px', borderWidth: '3px' }}></div>
-        <span style={{ fontSize: '0.95rem', color: 'var(--muted)', fontWeight: 500, fontFamily: 'var(--font-mono)' }}>Loading Admin Portal...</span>
+        <span style={{ fontSize: '0.95rem', color: 'var(--muted)', fontWeight: 500, fontFamily: 'var(--font-mono)' }}>Verifying Admin Credentials...</span>
       </div>
     );
   }
 
   return (
     <>
-      {/* Background Animated Glows */}
       <div className="bg-glow-container">
         <div className="bg-glow-1"></div>
-        <div className="bg-glow-2" style={{ background: 'radial-gradient(circle, rgba(147, 51, 234, 0.05) 0%, transparent 70%)' }}></div>
+        <div className="bg-glow-2"></div>
       </div>
 
-      <div className="app-container">
+      <div className="app-container" style={{ maxWidth: '1100px' }}>
         {/* Header */}
         <header className="app-header">
           <h1 className="app-logo">
-            Emons <span>Admin Panel</span>
+            Emons <span>Admin Portal</span>
           </h1>
           {isAdminAuthenticated && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
-              {/* Header Auto-Approve Toggle */}
-              <button
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <button 
                 onClick={handleToggleAutoApprove}
-                disabled={togglingAutoApprove}
-                style={{
+                className="btn-secondary" 
+                style={{ 
+                  padding: '0.45rem 1rem', 
+                  borderRadius: '10px', 
+                  fontSize: '0.8rem',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.65rem',
-                  padding: '0.42rem 0.95rem',
+                  gap: '0.5rem',
+                  borderColor: autoApprove ? 'rgba(16, 185, 129, 0.4)' : 'rgba(255, 255, 255, 0.1)',
                   background: autoApprove ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                  border: autoApprove ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border)',
-                  borderRadius: '10px',
-                  cursor: togglingAutoApprove ? 'wait' : 'pointer',
-                  color: '#fff',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  transition: 'all 0.25s ease',
-                  userSelect: 'none',
+                  color: autoApprove ? '#10b981' : 'var(--muted)',
+                  cursor: 'pointer'
                 }}
-                title={autoApprove ? "Click to disable Auto-Approve" : "Click to enable Auto-Approve"}
+                title="Toggle Auto-Approval for new signups"
               >
-                <div style={{
+                <span style={{
                   width: '8px',
                   height: '8px',
                   borderRadius: '50%',
-                  background: autoApprove ? 'var(--success)' : 'var(--muted)',
-                  boxShadow: autoApprove ? '0 0 8px var(--success)' : 'none',
-                }} />
-                <span>Auto-Approve: <strong style={{ color: autoApprove ? 'var(--success)' : 'var(--muted)' }}>{autoApprove ? 'ON' : 'OFF'}</strong></span>
-                {/* Switch indicator */}
-                <div style={{
-                  width: '32px',
-                  height: '18px',
-                  background: autoApprove ? 'var(--success)' : 'rgba(255, 255, 255, 0.15)',
-                  borderRadius: '99px',
-                  position: 'relative',
-                  transition: 'background 0.25s ease',
-                }}>
-                  <div style={{
-                    width: '14px',
-                    height: '14px',
-                    background: '#fff',
-                    borderRadius: '50%',
-                    position: 'absolute',
-                    top: '2px',
-                    left: autoApprove ? '16px' : '2px',
-                    transition: 'left 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                  }} />
-                </div>
+                  background: autoApprove ? '#10b981' : 'var(--muted)',
+                  boxShadow: autoApprove ? '0 0 8px #10b981' : 'none'
+                }}></span>
+                Auto-Approve: <strong>{autoApprove ? 'ON' : 'OFF'}</strong>
               </button>
 
-              <button className="btn-secondary" style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem' }} onClick={handleAdminLogout}>
-                Log Out Admin
+              <button className="btn-secondary" style={{ padding: '0.45rem 1rem', borderRadius: '10px', fontSize: '0.8rem' }} onClick={handleAdminLogout}>
+                Log Out
               </button>
             </div>
           )}
         </header>
 
-        {/* Admin Login UI */}
         {!isAdminAuthenticated ? (
+          /* Admin Login Form */
           <section className="auth-container">
-            <div className="glass-panel auth-card">
-              <h2 className="auth-title">Admin Login</h2>
+            <div className="glass-panel auth-card" style={{ maxWidth: '420px', width: '100%', padding: '2.5rem' }}>
+              <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+                <div style={{ background: 'rgba(147, 51, 234, 0.1)', border: '1px solid rgba(147, 51, 234, 0.25)', borderRadius: '50%', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem' }}>
+                  <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--primary-hover)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                </div>
+                <h2 className="auth-title" style={{ marginBottom: '0.25rem' }}>Admin Access</h2>
+                <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Enter master credentials to manage users and system approval.</p>
+              </div>
 
               {loginError && (
-                <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)', color: 'var(--error)', padding: '0.85rem 1.15rem', borderRadius: '12px', fontSize: '0.85rem', textAlign: 'center' }}>
+                <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)', color: 'var(--error)', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.85rem', marginBottom: '1.25rem', textAlign: 'center' }}>
                   {loginError}
                 </div>
               )}
 
               <form onSubmit={handleAdminLogin} className="auth-form">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Username</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Username</label>
                   <input
                     type="text"
                     className="input-field"
-                    placeholder="admin"
+                    placeholder="Admin username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required
-                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '0.75rem 1rem', color: '#fff' }}
                   />
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Password</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Password</label>
                   <input
                     type="password"
                     className="input-field"
@@ -361,92 +415,82 @@ export default function AdminDashboard() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '0.75rem 1rem', color: '#fff' }}
                   />
                 </div>
 
-                <button type="submit" className="btn-primary" disabled={loginLoading} style={{ marginTop: '0.5rem', height: '48px', width: '100%' }}>
-                  {loginLoading ? <div className="loader-small"></div> : 'Sign In as Admin'}
+                <button 
+                  type="submit" 
+                  className="btn-primary" 
+                  disabled={loginLoading}
+                  style={{ height: '46px', marginTop: '0.75rem', width: '100%' }}
+                >
+                  {loginLoading ? <div className="loader-small"></div> : 'Authorize Entry'}
                 </button>
               </form>
             </div>
           </section>
         ) : (
-          /* Admin Dashboard Content */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+          /* Admin Dashboard Overview & Table */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
             
-            {/* Quick Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.25rem' }}>
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</span>
-                  <span style={{ fontSize: '1.85rem', fontWeight: 800, color: '#fff' }}>{totalUsers}</span>
-                </div>
-                <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', padding: '0.75rem', color: 'var(--muted)' }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            {/* Quick Metrics Bar */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem' }}>
+              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ background: 'rgba(255, 255, 255, 0.05)', borderRadius: '12px', padding: '0.75rem' }}>
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: '#fff' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Accounts</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fff' }}>{users.length}</div>
                 </div>
               </div>
 
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem', border: '1px solid rgba(147, 51, 234, 0.2)' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--primary-hover)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending Approvals</span>
-                  <span style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--primary-hover)' }}>{pendingApprovals}</span>
-                </div>
-                <div style={{ background: 'rgba(147, 51, 234, 0.08)', borderRadius: '12px', padding: '0.75rem', color: 'var(--primary-hover)' }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ background: 'rgba(147, 51, 234, 0.1)', borderRadius: '12px', padding: '0.75rem' }}>
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--primary-hover)' }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending Review</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#a855f7' }}>{pendingCount}</div>
+                </div>
               </div>
 
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Approved Users</span>
-                  <span style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--success)' }}>{activeUsers}</span>
-                </div>
-                <div style={{ background: 'rgba(16, 185, 129, 0.08)', borderRadius: '12px', padding: '0.75rem', color: 'var(--success)' }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ background: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px', padding: '0.75rem' }}>
+                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--success)' }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Approved</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>{approvedCount}</div>
+                </div>
               </div>
 
-              {/* Interactive Auto-Approval Card */}
+              {/* Auto-Approval Status Card */}
               <div 
                 className="glass-panel auto-approve-card" 
                 onClick={handleToggleAutoApprove}
                 style={{ 
+                  padding: '1.25rem', 
                   display: 'flex', 
                   alignItems: 'center', 
-                  justifyContent: 'space-between', 
-                  padding: '1.25rem 1.5rem', 
-                  border: autoApprove ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
-                  background: autoApprove ? 'linear-gradient(145deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 15, 20, 0.7) 100%)' : 'var(--card-bg)',
-                  cursor: togglingAutoApprove ? 'wait' : 'pointer',
-                  transition: 'all 0.25s ease',
-                  userSelect: 'none',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  border: autoApprove ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border)',
+                  background: autoApprove ? 'rgba(16, 185, 129, 0.04)' : 'var(--card-bg)',
+                  transition: 'all 0.25s ease'
                 }}
-                title={autoApprove ? "Click to turn OFF auto-approval" : "Click to turn ON auto-approval"}
+                title="Click to toggle auto-approval mode"
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: autoApprove ? 'var(--success)' : 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Auto-Approval Mode
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Auto-Approve
                   </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '1.45rem', fontWeight: 800, color: autoApprove ? 'var(--success)' : '#fff' }}>
-                      {autoApprove ? 'Enabled' : 'Disabled'}
-                    </span>
-                    <span style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: autoApprove ? 'var(--success)' : 'var(--muted)',
-                      boxShadow: autoApprove ? '0 0 8px var(--success)' : 'none',
-                      display: 'inline-block',
-                    }} />
-                  </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.1rem' }}>
                     {autoApprove ? 'Instant access on signup' : 'Requires admin approval'}
                   </span>
@@ -479,6 +523,124 @@ export default function AdminDashboard() {
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Outbound SMTP Mail Server Configuration Card */}
+            <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', border: isSmtpConfigured ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(147, 51, 234, 0.25)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.85rem' }}>
+                <div>
+                  <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    ✉️ Outbound SMTP Configuration
+                    <span style={{ 
+                      fontSize: '0.7rem', 
+                      padding: '0.15rem 0.5rem', 
+                      borderRadius: '99px', 
+                      background: isSmtpConfigured ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)', 
+                      color: isSmtpConfigured ? '#34d399' : '#fb7185',
+                      border: isSmtpConfigured ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(244, 63, 94, 0.3)'
+                    }}>
+                      {isSmtpConfigured ? 'Active & Configured' : 'Not Configured (External mail delivery requires SMTP)'}
+                    </span>
+                  </h2>
+                  <p style={{ color: 'var(--muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
+                    Required for delivering emails to real external inboxes (Gmail, Yahoo, Outlook, etc.). Supports Gmail App Passwords, Brevo, Resend, SendGrid, or custom SMTP.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveSmtp} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>SMTP Host</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="e.g. smtp.gmail.com or smtp-relay.brevo.com"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>SMTP Port</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      placeholder="587 or 465"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(parseInt(e.target.value, 10))}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>SMTP Username / Email</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="yourname@gmail.com"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>SMTP Password / App Password</label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="16-digit App Password or API Key"
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.85rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.82rem', color: '#fff' }}>
+                    <input
+                      type="checkbox"
+                      checked={smtpSecure}
+                      onChange={(e) => setSmtpSecure(e.target.checked)}
+                    />
+                    Use SSL/TLS (Default ON for port 465)
+                  </label>
+
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <input
+                        type="email"
+                        className="input-field"
+                        placeholder="your_personal@gmail.com"
+                        value={testEmail}
+                        onChange={(e) => setTestEmail(e.target.value)}
+                        style={{ width: '220px', padding: '0.45rem 0.75rem', fontSize: '0.82rem' }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={handleTestSmtp}
+                        disabled={testingSmtp}
+                        style={{ padding: '0.45rem 0.95rem', borderRadius: '10px', fontSize: '0.82rem' }}
+                      >
+                        {testingSmtp ? 'Testing...' : 'Send Test Email'}
+                      </button>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={savingSmtp}
+                      style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem' }}
+                    >
+                      {savingSmtp ? 'Saving...' : 'Save SMTP Settings'}
+                    </button>
+                  </div>
+                </div>
+              </form>
             </div>
 
             {/* User List Panel */}
