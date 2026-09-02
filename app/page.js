@@ -55,6 +55,9 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(null); // 'sidebar' | 'list' | null
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Dynamic Email Iframe Auto-Height state
+  const [iframeHeight, setIframeHeight] = useState(650);
+
   // General UI state
   const [toasts, setToasts] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -131,6 +134,22 @@ export default function Home() {
       if (smsPollIntervalRef.current) clearInterval(smsPollIntervalRef.current);
     };
   }, [activeTab]);
+
+  // 4. Listen to email iframe height events to auto-expand reader pane
+  useEffect(() => {
+    const handleIframeMessage = (event) => {
+      if (event.data && event.data.type === 'EMAIL_IFRAME_HEIGHT' && typeof event.data.height === 'number') {
+        const measured = Math.max(550, Math.ceil(event.data.height) + 30);
+        setIframeHeight(measured);
+      }
+    };
+    window.addEventListener('message', handleIframeMessage);
+    return () => window.removeEventListener('message', handleIframeMessage);
+  }, []);
+
+  useEffect(() => {
+    setIframeHeight(650);
+  }, [selectedEmail?._id]);
 
   // Pane Resizing Drag Handlers
   const startResizing = (type) => (e) => {
@@ -1535,25 +1554,55 @@ export default function Home() {
                                 <iframe 
                                   className="reader-body-iframe"
                                   title="Email Body HTML"
-                                  sandbox="allow-popups allow-popups-to-escape-sandbox"
+                                  sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"
+                                  style={{ height: `${iframeHeight}px`, minHeight: '600px' }}
                                   srcDoc={`
                                     <!DOCTYPE html>
                                     <html>
                                       <head>
+                                        <meta charset="utf-8" />
+                                        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
                                         <style>
-                                          body {
+                                          html, body {
+                                            margin: 0;
+                                            padding: 16px;
                                             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                                             font-size: 14px;
                                             line-height: 1.6;
                                             color: #333333;
-                                            margin: 16px;
+                                            background: #ffffff;
                                             word-break: break-word;
                                           }
-                                          img { max-width: 100%; height: auto; }
+                                          img { max-width: 100%; height: auto; display: block; }
+                                          table { max-width: 100% !important; }
                                         </style>
                                       </head>
                                       <body>
                                         ${cleanedHtml}
+                                        <script>
+                                          function reportHeight() {
+                                            try {
+                                              var body = document.body;
+                                              var html = document.documentElement;
+                                              if (!body) return;
+                                              var height = Math.max(
+                                                body.scrollHeight, body.offsetHeight,
+                                                html.clientHeight, html.scrollHeight, html.offsetHeight
+                                              );
+                                              window.parent.postMessage({ type: 'EMAIL_IFRAME_HEIGHT', height: height }, '*');
+                                            } catch(e) {}
+                                          }
+                                          window.addEventListener('load', reportHeight);
+                                          window.addEventListener('resize', reportHeight);
+                                          document.addEventListener('DOMContentLoaded', reportHeight);
+                                          setTimeout(reportHeight, 150);
+                                          setTimeout(reportHeight, 500);
+                                          setTimeout(reportHeight, 1200);
+                                          setTimeout(reportHeight, 2500);
+                                          if (window.ResizeObserver) {
+                                            new ResizeObserver(reportHeight).observe(document.body);
+                                          }
+                                        </script>
                                       </body>
                                     </html>
                                   `}

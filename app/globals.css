@@ -677,7 +677,8 @@ html, body {
   border-radius: 14px;
   padding: 1.25rem;
   flex-grow: 1;
-  min-height: 420px;
+  min-height: 500px;
+  height: auto;
   display: flex;
   flex-direction: column;
 }
@@ -685,9 +686,11 @@ html, body {
 .reader-body-iframe {
   width: 100%;
   border: none;
-  flex-grow: 1;
+  min-height: 600px;
   background: #ffffff;
   border-radius: 10px;
+  transition: height 0.15s ease-out;
+  display: block;
 }
 
 .reader-body-text {
@@ -1234,7 +1237,7 @@ html, body {
 /* Resizable Workspace Multi-Column Splitter Layout */
 .resizable-workspace-layout {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 0;
   width: 100%;
   position: relative;
