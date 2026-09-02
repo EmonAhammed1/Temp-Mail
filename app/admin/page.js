@@ -17,6 +17,10 @@ export default function AdminDashboard() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Auto-approve setting state
+  const [autoApprove, setAutoApprove] = useState(false);
+  const [togglingAutoApprove, setTogglingAutoApprove] = useState(false);
+
   // Toast notifications state
   const [toasts, setToasts] = useState([]);
 
@@ -26,7 +30,7 @@ export default function AdminDashboard() {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    }, 3500);
   };
 
   // Check admin session on mount
@@ -43,12 +47,59 @@ export default function AdminDashboard() {
         if (data.success) {
           setIsAdminAuthenticated(true);
           setUsers(data.users || []);
+          fetchSettings();
         }
       }
     } catch (err) {
       console.error('Failed to verify admin status:', err);
     } finally {
       setCheckingSession(false);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          setAutoApprove(Boolean(data.settings.autoApprove));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch system settings:', err);
+    }
+  };
+
+  const handleToggleAutoApprove = async () => {
+    if (togglingAutoApprove) return;
+    const targetState = !autoApprove;
+    setTogglingAutoApprove(true);
+
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoApprove: targetState }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAutoApprove(Boolean(data.autoApprove));
+        addToast(
+          data.autoApprove
+            ? '⚡ Auto-Approve Enabled: New accounts will be approved automatically!'
+            : '🔒 Auto-Approve Disabled: New accounts will require manual approval.',
+          'success'
+        );
+      } else {
+        addToast(data.error || 'Failed to update auto-approval setting', 'error');
+      }
+    } catch (err) {
+      console.error('Error toggling auto-approval:', err);
+      addToast('An error occurred while updating auto-approval', 'error');
+    } finally {
+      setTogglingAutoApprove(false);
     }
   };
 
@@ -69,6 +120,7 @@ export default function AdminDashboard() {
         setIsAdminAuthenticated(true);
         addToast('Welcome Admin!', 'success');
         fetchUsers();
+        fetchSettings();
       } else {
         setLoginError(data.error || 'Invalid credentials');
       }
@@ -214,9 +266,63 @@ export default function AdminDashboard() {
             Emons <span>Admin Panel</span>
           </h1>
           {isAdminAuthenticated && (
-            <button className="btn-secondary" style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem' }} onClick={handleAdminLogout}>
-              Log Out Admin
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+              {/* Header Auto-Approve Toggle */}
+              <button
+                onClick={handleToggleAutoApprove}
+                disabled={togglingAutoApprove}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  padding: '0.42rem 0.95rem',
+                  background: autoApprove ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                  border: autoApprove ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid var(--border)',
+                  borderRadius: '10px',
+                  cursor: togglingAutoApprove ? 'wait' : 'pointer',
+                  color: '#fff',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  transition: 'all 0.25s ease',
+                  userSelect: 'none',
+                }}
+                title={autoApprove ? "Click to disable Auto-Approve" : "Click to enable Auto-Approve"}
+              >
+                <div style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: autoApprove ? 'var(--success)' : 'var(--muted)',
+                  boxShadow: autoApprove ? '0 0 8px var(--success)' : 'none',
+                }} />
+                <span>Auto-Approve: <strong style={{ color: autoApprove ? 'var(--success)' : 'var(--muted)' }}>{autoApprove ? 'ON' : 'OFF'}</strong></span>
+                {/* Switch indicator */}
+                <div style={{
+                  width: '32px',
+                  height: '18px',
+                  background: autoApprove ? 'var(--success)' : 'rgba(255, 255, 255, 0.15)',
+                  borderRadius: '99px',
+                  position: 'relative',
+                  transition: 'background 0.25s ease',
+                }}>
+                  <div style={{
+                    width: '14px',
+                    height: '14px',
+                    background: '#fff',
+                    borderRadius: '50%',
+                    position: 'absolute',
+                    top: '2px',
+                    left: autoApprove ? '16px' : '2px',
+                    transition: 'left 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                  }} />
+                </div>
+              </button>
+
+              <button className="btn-secondary" style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem' }} onClick={handleAdminLogout}>
+                Log Out Admin
+              </button>
+            </div>
           )}
         </header>
 
@@ -270,7 +376,7 @@ export default function AdminDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
             
             {/* Quick Stats Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.25rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.25rem' }}>
               <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Users</span>
@@ -304,6 +410,73 @@ export default function AdminDashboard() {
                   <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
+                </div>
+              </div>
+
+              {/* Interactive Auto-Approval Card */}
+              <div 
+                className="glass-panel auto-approve-card" 
+                onClick={handleToggleAutoApprove}
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  padding: '1.25rem 1.5rem', 
+                  border: autoApprove ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                  background: autoApprove ? 'linear-gradient(145deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 15, 20, 0.7) 100%)' : 'var(--card-bg)',
+                  cursor: togglingAutoApprove ? 'wait' : 'pointer',
+                  transition: 'all 0.25s ease',
+                  userSelect: 'none',
+                }}
+                title={autoApprove ? "Click to turn OFF auto-approval" : "Click to turn ON auto-approval"}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: autoApprove ? 'var(--success)' : 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Auto-Approval Mode
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.45rem', fontWeight: 800, color: autoApprove ? 'var(--success)' : '#fff' }}>
+                      {autoApprove ? 'Enabled' : 'Disabled'}
+                    </span>
+                    <span style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: autoApprove ? 'var(--success)' : 'var(--muted)',
+                      boxShadow: autoApprove ? '0 0 8px var(--success)' : 'none',
+                      display: 'inline-block',
+                    }} />
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '0.1rem' }}>
+                    {autoApprove ? 'Instant access on signup' : 'Requires admin approval'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
+                  <div style={{
+                    width: '44px',
+                    height: '24px',
+                    background: autoApprove ? 'var(--success)' : 'rgba(255, 255, 255, 0.15)',
+                    borderRadius: '99px',
+                    position: 'relative',
+                    transition: 'all 0.25s ease',
+                    boxShadow: autoApprove ? '0 0 12px rgba(16, 185, 129, 0.45)' : 'none',
+                  }}>
+                    <div style={{
+                      width: '18px',
+                      height: '18px',
+                      background: '#fff',
+                      borderRadius: '50%',
+                      position: 'absolute',
+                      top: '3px',
+                      left: autoApprove ? '23px' : '3px',
+                      transition: 'left 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                    }} />
+                  </div>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: autoApprove ? 'var(--success)' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {togglingAutoApprove ? 'Updating...' : (autoApprove ? 'ON' : 'OFF')}
+                  </span>
                 </div>
               </div>
             </div>
@@ -461,6 +634,10 @@ export default function AdminDashboard() {
       <style dangerouslySetInnerHTML={{__html: `
         .admin-user-row:hover {
           background: rgba(255, 255, 255, 0.02) !important;
+        }
+        .auto-approve-card:hover {
+          border-color: rgba(16, 185, 129, 0.5) !important;
+          transform: translateY(-2px);
         }
       `}} />
     </>

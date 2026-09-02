@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import dbConnect from '@/lib/db';
 import User from '@/models/User';
+import Setting from '@/models/Setting';
 import { hashPassword, signToken } from '@/lib/auth';
 
 export async function POST(req) {
@@ -19,16 +20,25 @@ export async function POST(req) {
     await dbConnect();
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    const normalizedEmail = email.toLowerCase().trim();
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return NextResponse.json({ error: 'User already exists with this email' }, { status: 400 });
     }
 
-    // Create user
+    // Check system auto-approval setting
+    const autoApproveSetting = await Setting.findOne({ key: 'auto_approve' }).lean();
+    const isAutoApprove = autoApproveSetting ? Boolean(autoApproveSetting.value) : false;
+    const initialStatus = isAutoApprove ? 'approved' : 'pending';
+
+    console.log(`[API Signup] Registering "${normalizedEmail}" with initial status: "${initialStatus}" (Auto-Approve: ${isAutoApprove})`);
+
+    // Create user with determined status
     const hashedPassword = await hashPassword(password);
     const user = await User.create({
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       password: hashedPassword,
+      status: initialStatus,
     });
 
     // Sign session token
@@ -44,9 +54,11 @@ export async function POST(req) {
       path: '/',
     });
 
+    console.log(`[API Signup Success] User "${user.email}" registered successfully. Status: ${user.status}`);
+
     return NextResponse.json({
       success: true,
-      user: { id: user._id, email: user.email },
+      user: { id: user._id, email: user.email, status: user.status },
     }, { status: 201 });
 
   } catch (error) {
