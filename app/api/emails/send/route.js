@@ -14,7 +14,7 @@ export async function POST(req) {
     }
 
     const body = await req.json();
-    const { from, to, subject, message, bodyHtml } = body;
+    const { from, to, subject, message, bodyHtml, isPlainText } = body;
 
     if (!from || !to || !message || !message.trim()) {
       return NextResponse.json({ error: 'Sender address, recipient, and message body are required' }, { status: 400 });
@@ -48,7 +48,7 @@ export async function POST(req) {
       subject,
       message,
       html: bodyHtml,
-      reqUrl: req.url,
+      isPlainText: Boolean(isPlainText),
     });
 
     if (!result.success) {

@@ -48,6 +48,7 @@ export default function Home() {
   const [composeSubject, setComposeSubject] = useState('');
   const [composeMessage, setComposeMessage] = useState('');
   const [composeSending, setComposeSending] = useState(false);
+  const [isPlainTextMode, setIsPlainTextMode] = useState(false);
 
   // Resizable Panes state (Sidebar & List widths)
   const [sidebarWidth, setSidebarWidth] = useState(330);
@@ -696,6 +697,7 @@ export default function Home() {
           subject: replySubject,
           message: replyBody,
           quotedText: selectedEmail?.bodyText || '',
+          isPlainText: isPlainTextMode,
         }),
       });
 
@@ -745,6 +747,7 @@ export default function Home() {
           to: composeTo.trim(),
           subject: composeSubject.trim(),
           message: composeMessage.trim(),
+          isPlainText: isPlainTextMode,
         }),
       });
 
@@ -1563,6 +1566,8 @@ export default function Home() {
                               className="compose-toolbar-btn"
                               onClick={() => setComposeMessage((prev) => prev + '**Bold Text**')}
                               title="Bold text"
+                              disabled={isPlainTextMode}
+                              style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                             >
                               <strong>B</strong>
                             </button>
@@ -1571,6 +1576,8 @@ export default function Home() {
                               className="compose-toolbar-btn"
                               onClick={() => setComposeMessage((prev) => prev + '*Italic Text*')}
                               title="Italic text"
+                              disabled={isPlainTextMode}
+                              style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                             >
                               <em>I</em>
                             </button>
@@ -1579,6 +1586,8 @@ export default function Home() {
                               className="compose-toolbar-btn"
                               onClick={() => setComposeMessage((prev) => prev + '`code snippet`')}
                               title="Code / Highlight"
+                              disabled={isPlainTextMode}
+                              style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                             >
                               &lt;/&gt;
                             </button>
@@ -1587,9 +1596,20 @@ export default function Home() {
                               className="compose-toolbar-btn"
                               onClick={() => setComposeMessage((prev) => prev + '\n• Point 1\n• Point 2\n')}
                               title="Bullet list"
+                              disabled={isPlainTextMode}
+                              style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                             >
                               • List
                             </button>
+
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', color: isPlainTextMode ? '#34d399' : 'var(--muted)', cursor: 'pointer', marginLeft: 'auto', fontWeight: 600 }}>
+                              <input 
+                                type="checkbox" 
+                                checked={isPlainTextMode} 
+                                onChange={(e) => setIsPlainTextMode(e.target.checked)} 
+                              />
+                              Plain Text (Anti-Spam Mode)
+                            </label>
                           </div>
 
                           {/* Message Body Textarea */}
@@ -1819,6 +1839,8 @@ export default function Home() {
                                   className="compose-toolbar-btn"
                                   onClick={() => setReplyBody((prev) => prev + '**Bold Text**')}
                                   title="Bold text"
+                                  disabled={isPlainTextMode}
+                                  style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                                 >
                                   <strong>B</strong>
                                 </button>
@@ -1827,6 +1849,8 @@ export default function Home() {
                                   className="compose-toolbar-btn"
                                   onClick={() => setReplyBody((prev) => prev + '*Italic Text*')}
                                   title="Italic text"
+                                  disabled={isPlainTextMode}
+                                  style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                                 >
                                   <em>I</em>
                                 </button>
@@ -1835,6 +1859,8 @@ export default function Home() {
                                   className="compose-toolbar-btn"
                                   onClick={() => setReplyBody((prev) => prev + '`code snippet`')}
                                   title="Code / Highlight"
+                                  disabled={isPlainTextMode}
+                                  style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                                 >
                                   &lt;/&gt;
                                 </button>
@@ -1843,9 +1869,20 @@ export default function Home() {
                                   className="compose-toolbar-btn"
                                   onClick={() => setReplyBody((prev) => prev + '\n• Point 1\n• Point 2\n')}
                                   title="Bullet list"
+                                  disabled={isPlainTextMode}
+                                  style={{ opacity: isPlainTextMode ? 0.4 : 1 }}
                                 >
                                   • List
                                 </button>
+
+                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', color: isPlainTextMode ? '#34d399' : 'var(--muted)', cursor: 'pointer', marginLeft: 'auto', fontWeight: 600 }}>
+                                  <input 
+                                    type="checkbox" 
+                                    checked={isPlainTextMode} 
+                                    onChange={(e) => setIsPlainTextMode(e.target.checked)} 
+                                  />
+                                  Plain Text
+                                </label>
                               </div>
 
                               <textarea 
