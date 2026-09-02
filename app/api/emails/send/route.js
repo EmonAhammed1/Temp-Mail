@@ -42,11 +42,13 @@ export async function POST(req) {
     }
 
     const result = await dispatchEmail({
+      userId,
       from: cleanFrom,
       to: cleanTo,
       subject,
       message,
       html: bodyHtml,
+      reqUrl: req.url,
     });
 
     if (!result.success) {

@@ -64,8 +64,17 @@ export default function Home() {
   const pollIntervalRef = useRef(null);
   const [focusedField, setFocusedField] = useState('');
 
-  // Workspace active tab ('mail' or 'sms')
+  // Workspace active tab ('mail', 'sent', or 'sms')
   const [activeTab, setActiveTab] = useState('mail');
+
+  // Sent Emails & Outbox Analytics state
+  const [sentEmails, setSentEmails] = useState([]);
+  const [sentStats, setSentStats] = useState({ total: 0, delivered: 0, opened: 0, failed: 0 });
+  const [sentLoading, setSentLoading] = useState(false);
+  const [sentFilter, setSentFilter] = useState('all'); // 'all' | 'delivered' | 'opened' | 'failed'
+  const [sentSearch, setSentSearch] = useState('');
+  const [selectedSentEmail, setSelectedSentEmail] = useState(null);
+  const [resendingId, setResendingId] = useState(null);
 
   // SMS state
   const [smsList, setSmsList] = useState([]);
@@ -135,7 +144,86 @@ export default function Home() {
     };
   }, [activeTab]);
 
-  // 4. Listen to email iframe height events to precisely fit email content
+  // 4. Fetch Sent Emails when activeTab === 'sent', or filter/search changes
+  useEffect(() => {
+    if (activeTab === 'sent') {
+      fetchSentEmails(true);
+    }
+  }, [activeTab, sentFilter, sentSearch]);
+
+  const fetchSentEmails = async (showLoading = true) => {
+    if (showLoading) setSentLoading(true);
+    try {
+      let url = `/api/emails/sent?status=${sentFilter}`;
+      if (sentSearch.trim()) url += `&search=${encodeURIComponent(sentSearch.trim())}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setSentEmails(data.sentEmails || []);
+          if (data.stats) setSentStats(data.stats);
+          if (!selectedSentEmail && data.sentEmails && data.sentEmails.length > 0) {
+            setSelectedSentEmail(data.sentEmails[0]);
+          } else if (selectedSentEmail && data.sentEmails) {
+            const updated = data.sentEmails.find((e) => e._id === selectedSentEmail._id);
+            if (updated) setSelectedSentEmail(updated);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch sent emails:', err);
+    } finally {
+      if (showLoading) setSentLoading(false);
+    }
+  };
+
+  const handleResendEmail = async (sentItem) => {
+    if (!sentItem || resendingId) return;
+    setResendingId(sentItem._id);
+    try {
+      const res = await fetch('/api/emails/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: sentItem.from,
+          to: sentItem.to,
+          subject: sentItem.subject,
+          message: sentItem.bodyText,
+          bodyHtml: sentItem.bodyHtml,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addToast(data.message || 'Email resent successfully! 🚀', 'success');
+        fetchSentEmails(false);
+      } else {
+        addToast(data.error || 'Failed to resend email', 'error');
+        fetchSentEmails(false);
+      }
+    } catch (err) {
+      addToast('An error occurred while resending email', 'error');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  const handleDeleteSentEmail = async (id) => {
+    try {
+      const res = await fetch(`/api/emails/sent?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSentEmails((prev) => prev.filter((e) => e._id !== id));
+        if (selectedSentEmail?._id === id) {
+          const remaining = sentEmails.filter((e) => e._id !== id);
+          setSelectedSentEmail(remaining.length > 0 ? remaining[0] : null);
+        }
+        addToast('Sent email record deleted');
+      }
+    } catch (err) {
+      addToast('Failed to delete record', 'error');
+    }
+  };
+
+  // 5. Listen to email iframe height events to precisely fit email content
   useEffect(() => {
     const handleIframeMessage = (event) => {
       if (event.data && event.data.type === 'EMAIL_IFRAME_HEIGHT' && typeof event.data.height === 'number') {
@@ -616,8 +704,10 @@ export default function Home() {
         addToast(data.message || 'Reply sent successfully! 🚀');
         setIsReplying(false);
         setReplyBody('');
+        fetchSentEmails(false);
       } else {
         addToast(data.error || 'Failed to send reply', 'error');
+        fetchSentEmails(false);
       }
     } catch (err) {
       console.error('Reply send error:', err);
@@ -667,8 +757,10 @@ export default function Home() {
         setComposeTo('');
         setComposeSubject('');
         setComposeMessage('');
+        fetchSentEmails(false);
       } else {
         addToast(data.error || 'Failed to send email', 'error');
+        fetchSentEmails(false);
       }
     } catch (err) {
       console.error('Send email error:', err);
@@ -937,7 +1029,29 @@ export default function Home() {
                   <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
-                  Email Service
+                  Email Inbox
+                </button>
+                <button
+                  className={`workspace-tab ${activeTab === 'sent' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('sent')}
+                >
+                  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  Sent Outbox & Analytics
+                  {sentStats.total > 0 && (
+                    <span style={{
+                      background: 'rgba(168, 85, 247, 0.25)',
+                      color: '#c084fc',
+                      padding: '0.1rem 0.5rem',
+                      borderRadius: '99px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      marginLeft: '0.35rem',
+                    }}>
+                      {sentStats.total}
+                    </span>
+                  )}
                 </button>
                 <button
                   className={`workspace-tab ${activeTab === 'sms' ? 'active' : ''}`}
@@ -1922,6 +2036,239 @@ export default function Home() {
                   </div>
                 </div>
               </>
+            )}
+
+            {/* SENT OUTBOX & DELIVERY ANALYTICS VIEW */}
+            {activeTab === 'sent' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%', animation: 'fadeIn 0.3s ease' }}>
+                
+                {/* Analytics Metrics Overview Cards */}
+                <div className="sent-stats-grid">
+                  <div className="sent-stat-card">
+                    <div className="sent-stat-icon-wrap" style={{ background: 'rgba(147, 51, 234, 0.12)', color: '#c084fc' }}>
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="sent-stat-label">Total Outbound Mails</div>
+                      <div className="sent-stat-value">{sentStats.total}</div>
+                    </div>
+                  </div>
+
+                  <div className="sent-stat-card">
+                    <div className="sent-stat-icon-wrap" style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#34d399' }}>
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="sent-stat-label">Delivered Successfully</div>
+                      <div className="sent-stat-value" style={{ color: '#10b981' }}>{sentStats.delivered}</div>
+                    </div>
+                  </div>
+
+                  <div className="sent-stat-card">
+                    <div className="sent-stat-icon-wrap" style={{ background: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa' }}>
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="sent-stat-label">Opened / Read</div>
+                      <div className="sent-stat-value" style={{ color: '#3b82f6' }}>{sentStats.opened}</div>
+                    </div>
+                  </div>
+
+                  <div className="sent-stat-card">
+                    <div className="sent-stat-icon-wrap" style={{ background: 'rgba(244, 63, 94, 0.12)', color: '#fb7185' }}>
+                      <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="sent-stat-label">Failed Deliveries</div>
+                      <div className="sent-stat-value" style={{ color: '#f43f5e' }}>{sentStats.failed}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sent Dashboard Split Layout (List + Inspector) */}
+                <div className="sent-dashboard-layout">
+                  {/* Left List Pane */}
+                  <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minHeight: '520px' }}>
+                    {/* Header & Filter Tabs */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(0,0,0,0.3)', padding: '0.25rem', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        {['all', 'delivered', 'opened', 'failed'].map((st) => (
+                          <button
+                            key={st}
+                            onClick={() => setSentFilter(st)}
+                            style={{
+                              background: sentFilter === st ? 'var(--primary)' : 'transparent',
+                              color: sentFilter === st ? '#fff' : 'var(--muted)',
+                              border: 'none',
+                              borderRadius: '7px',
+                              padding: '0.3rem 0.65rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 750,
+                              cursor: 'pointer',
+                              textTransform: 'capitalize',
+                            }}
+                          >
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        className="btn-secondary"
+                        onClick={() => fetchSentEmails(true)}
+                        style={{ padding: '0.3rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem' }}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    {/* Search */}
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Search by recipient, sender, subject..."
+                      value={sentSearch}
+                      onChange={(e) => setSentSearch(e.target.value)}
+                      style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', borderRadius: '10px' }}
+                    />
+
+                    {/* Sent List Scroll */}
+                    <div className="emails-scroll" style={{ maxHeight: '600px' }}>
+                      {sentLoading ? (
+                        Array.from({ length: 4 }).map((_, i) => (
+                          <div key={i} className="shimmer shimmer-card" />
+                        ))
+                      ) : sentEmails.length === 0 ? (
+                        <div className="empty-state">
+                          <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                          <h4>No Sent Emails Found</h4>
+                          <p style={{ fontSize: '0.8rem' }}>Emails you send or reply to will appear here with live tracking.</p>
+                        </div>
+                      ) : (
+                        sentEmails.map((item) => {
+                          const isSelected = selectedSentEmail?._id === item._id;
+                          const dateStr = new Date(item.createdAt).toLocaleString();
+                          return (
+                            <div
+                              key={item._id}
+                              className={`sent-item ${isSelected ? 'selected' : ''}`}
+                              onClick={() => setSelectedSentEmail(item)}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#fff' }}>
+                                  To: {item.to}
+                                </span>
+                                <span className={`sent-badge ${item.status}`}>
+                                  {item.status === 'opened' ? '👁️ OPENED' : item.status === 'failed' ? '❌ FAILED' : '✅ DELIVERED'}
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--primary-hover)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {item.subject || '(No Subject)'}
+                              </div>
+
+                              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>From: {item.from}</span>
+                                <span>{dateStr}</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Detail / Inspector Pane */}
+                  <div className="glass-panel" style={{ minHeight: '520px', display: 'flex', flexDirection: 'column' }}>
+                    {selectedSentEmail ? (
+                      <div className="sent-inspector">
+                        {/* Header / Meta Bar */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+                          <div>
+                            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', marginBottom: '0.35rem' }}>
+                              {selectedSentEmail.subject}
+                            </h3>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem', color: 'var(--muted)' }}>
+                              <div>From: <strong style={{ color: '#fff' }}>{selectedSentEmail.from}</strong></div>
+                              <div>To: <strong style={{ color: 'var(--primary-hover)' }}>{selectedSentEmail.to}</strong></div>
+                              <div>Sent At: <strong style={{ color: '#fff' }}>{new Date(selectedSentEmail.createdAt).toLocaleString()}</strong></div>
+                              {selectedSentEmail.isOpened && (
+                                <div style={{ color: '#3b82f6', fontWeight: 700 }}>
+                                  👁️ Opened by recipient: {new Date(selectedSentEmail.openedAt).toLocaleString()} ({selectedSentEmail.openCount} time{selectedSentEmail.openCount > 1 ? 's' : ''})
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <button
+                              className="btn-primary"
+                              onClick={() => handleResendEmail(selectedSentEmail)}
+                              disabled={resendingId === selectedSentEmail._id}
+                              style={{ padding: '0.45rem 0.95rem', borderRadius: '10px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                            >
+                              {resendingId === selectedSentEmail._id ? 'Sending...' : '🔄 Resend'}
+                            </button>
+                            <button
+                              className="btn-danger"
+                              onClick={() => handleDeleteSentEmail(selectedSentEmail._id)}
+                              style={{ padding: '0.45rem 0.65rem', borderRadius: '10px', fontSize: '0.8rem' }}
+                              title="Delete record"
+                            >
+                              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Error Message Alert (if delivery failed) */}
+                        {selectedSentEmail.status === 'failed' && (
+                          <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.3)', borderRadius: '12px', padding: '1rem', color: '#fb7185', fontSize: '0.85rem' }}>
+                            <div style={{ fontWeight: 800, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              ❌ Delivery Failed Reason:
+                            </div>
+                            <div>{selectedSentEmail.errorMessage || 'Unknown SMTP error'}</div>
+                            <div style={{ marginTop: '0.5rem', fontSize: '0.78rem', color: 'var(--muted)' }}>
+                              💡 Tip: Verify your SMTP credentials in the Admin Portal (/admin) and click "Resend".
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Rendered HTML / Text Email Preview */}
+                        <div style={{ flexGrow: 1, borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', background: '#fff' }}>
+                          <iframe
+                            title="Sent Email Content Preview"
+                            srcDoc={selectedSentEmail.bodyHtml || `<div style="font-family: sans-serif; padding: 20px; white-space: pre-wrap;">${selectedSentEmail.bodyText}</div>`}
+                            style={{ width: '100%', height: '520px', border: 'none' }}
+                            sandbox="allow-same-origin"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="empty-state" style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1" style={{ opacity: 0.4 }}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        <h3 style={{ color: '#fff', marginTop: '0.75rem' }}>No Email Selected</h3>
+                        <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Select a sent email from the list on the left to inspect delivery logs and contents.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
             )}
           </div>
         )}

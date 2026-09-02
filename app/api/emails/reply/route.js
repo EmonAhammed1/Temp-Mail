@@ -44,11 +44,13 @@ export async function POST(req) {
     const replySubject = subject ? (subject.startsWith('Re:') ? subject.trim() : `Re: ${subject.trim()}`) : 'Re: (No Subject)';
 
     const result = await dispatchEmail({
+      userId,
       from: cleanFrom,
       to: cleanTo,
       subject: replySubject,
       message,
       quotedText,
+      reqUrl: req.url,
     });
 
     if (!result.success) {
