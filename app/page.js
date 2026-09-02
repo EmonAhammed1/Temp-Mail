@@ -30,6 +30,17 @@ export default function Home() {
   const [emailsLoading, setEmailsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Email Selection & Filtering state
+  const [selectedEmailIds, setSelectedEmailIds] = useState([]);
+  const [emailFilter, setEmailFilter] = useState('all'); // 'all', 'unread', 'read'
+
+  // Email Reply state
+  const [isReplying, setIsReplying] = useState(false);
+  const [replySubject, setReplySubject] = useState('');
+  const [replyBody, setReplyBody] = useState('');
+  const [replyRecipient, setReplyRecipient] = useState('');
+  const [replySending, setReplySending] = useState(false);
+
   // General UI state
   const [toasts, setToasts] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -52,7 +63,7 @@ export default function Home() {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    }, 3500);
   };
 
   // 1. Session check on mount
@@ -202,19 +213,19 @@ export default function Home() {
       
       if (data.success) {
         setSmsList((prev) => prev.filter((sms) => sms._id !== id));
-        addToast('SMS deleted successfully');
+        addToast('SMS message deleted successfully');
       } else {
-        addToast(data.error || 'Failed to delete SMS', 'error');
+        addToast('Failed to delete SMS message', 'error');
       }
     } catch (err) {
       console.error('Error deleting SMS:', err);
-      addToast('An error occurred while deleting SMS', 'error');
+      addToast('An error occurred while deleting', 'error');
     }
   };
 
   const copyTwilioNumber = () => {
-    const TWILIO_NUMBER = (process.env.NEXT_PUBLIC_TWILIO_NUMBER || '+13342318047').trim();
-    navigator.clipboard.writeText(TWILIO_NUMBER);
+    const num = (process.env.NEXT_PUBLIC_TWILIO_NUMBER || '+13342318047').trim();
+    navigator.clipboard.writeText(num);
     setCopiedSms(true);
     addToast('Copied phone number to clipboard!');
     setTimeout(() => setCopiedSms(false), 2000);
@@ -242,7 +253,7 @@ export default function Home() {
         setIsImpersonated(!!data.isImpersonated);
         addToast(authMode === 'login' ? 'Welcome back!' : 'Registered successfully!');
         // Load inboxes if user is approved
-        if (data.user.status === 'approved') {
+        if (data.user?.status === 'approved') {
           fetchInboxes();
         }
         // Reset auth fields
@@ -270,6 +281,7 @@ export default function Home() {
         setActiveInbox('');
         setEmails([]);
         setSelectedEmail(null);
+        setSelectedEmailIds([]);
         localStorage.removeItem('temp_mail_active_inbox');
         addToast('Logged out successfully.');
       }
@@ -357,8 +369,10 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         setEmails((prev) => prev.filter((email) => email._id !== id));
+        setSelectedEmailIds((prev) => prev.filter((item) => item !== id));
         if (selectedEmail && selectedEmail._id === id) {
           setSelectedEmail(null);
+          setIsReplying(false);
         }
         addToast('Email deleted successfully');
       } else {
@@ -370,6 +384,179 @@ export default function Home() {
     }
   };
 
+  // Multi-Selection Toggle
+  const handleToggleSelectEmail = (id, e) => {
+    if (e) e.stopPropagation();
+    setSelectedEmailIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Select/Deselect All in filtered list
+  const handleToggleSelectAll = () => {
+    if (selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0) {
+      setSelectedEmailIds([]);
+    } else {
+      setSelectedEmailIds(filteredEmails.map((em) => em._id));
+    }
+  };
+
+  // Bulk Delete Selected Emails
+  const handleBulkDeleteEmails = async () => {
+    if (selectedEmailIds.length === 0) return;
+    if (!confirm(`Are you sure you want to permanently delete ${selectedEmailIds.length} selected email(s)?`)) return;
+
+    try {
+      const res = await fetch('/api/emails', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedEmailIds }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEmails((prev) => prev.filter((em) => !selectedEmailIds.includes(em._id)));
+        if (selectedEmail && selectedEmailIds.includes(selectedEmail._id)) {
+          setSelectedEmail(null);
+          setIsReplying(false);
+        }
+        addToast(`${data.deletedCount || selectedEmailIds.length} email(s) deleted successfully`);
+        setSelectedEmailIds([]);
+      } else {
+        addToast(data.error || 'Failed to delete selected emails', 'error');
+      }
+    } catch (err) {
+      console.error('Bulk delete error:', err);
+      addToast('An error occurred while deleting emails', 'error');
+    }
+  };
+
+  // Bulk Mark Read / Unread
+  const handleBulkMarkRead = async (isRead) => {
+    if (selectedEmailIds.length === 0) return;
+    try {
+      const res = await fetch('/api/emails', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedEmailIds, isRead }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEmails((prev) =>
+          prev.map((em) =>
+            selectedEmailIds.includes(em._id) ? { ...em, isRead } : em
+          )
+        );
+        if (selectedEmail && selectedEmailIds.includes(selectedEmail._id)) {
+          setSelectedEmail((prev) => (prev ? { ...prev, isRead } : null));
+        }
+        addToast(`Marked ${selectedEmailIds.length} email(s) as ${isRead ? 'read' : 'unread'}`);
+        setSelectedEmailIds([]);
+      } else {
+        addToast(data.error || 'Failed to update email status', 'error');
+      }
+    } catch (err) {
+      console.error('Mark read error:', err);
+      addToast('An error occurred while updating status', 'error');
+    }
+  };
+
+  // Single Email Read / Unread toggle
+  const handleToggleEmailReadStatus = async (id, isRead) => {
+    try {
+      // Optimistic update
+      setEmails((prev) =>
+        prev.map((em) => (em._id === id ? { ...em, isRead } : em))
+      );
+      if (selectedEmail && selectedEmail._id === id) {
+        setSelectedEmail((prev) => (prev ? { ...prev, isRead } : null));
+      }
+
+      const res = await fetch('/api/emails', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, isRead }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast(`Marked as ${isRead ? 'read' : 'unread'}`);
+      }
+    } catch (err) {
+      console.error('Failed to update read status:', err);
+    }
+  };
+
+  // Open email and automatically mark as read
+  const handleOpenEmail = async (email) => {
+    setSelectedEmail(email);
+    setIsReplying(false);
+    setReplyBody('');
+
+    if (!email.isRead) {
+      setEmails((prev) =>
+        prev.map((em) => (em._id === email._id ? { ...em, isRead: true } : em))
+      );
+      try {
+        await fetch('/api/emails', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: email._id, isRead: true }),
+        });
+      } catch (err) {
+        console.error('Error marking email as read:', err);
+      }
+    }
+  };
+
+  // Start Reply Flow
+  const handleStartReply = () => {
+    if (!selectedEmail) return;
+    const match = selectedEmail.from.match(/<([^>]+)>/) || [null, selectedEmail.from.trim()];
+    const targetTo = match[1] || selectedEmail.from.trim();
+
+    setReplyRecipient(targetTo);
+    setReplySubject(selectedEmail.subject.startsWith('Re:') ? selectedEmail.subject : `Re: ${selectedEmail.subject}`);
+    setReplyBody('');
+    setIsReplying(true);
+  };
+
+  // Send Reply Request
+  const handleSendReply = async (e) => {
+    if (e) e.preventDefault();
+    if (!replyBody.trim()) {
+      addToast('Please type a reply message', 'error');
+      return;
+    }
+    setReplySending(true);
+
+    try {
+      const res = await fetch('/api/emails/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: activeInbox,
+          to: replyRecipient,
+          subject: replySubject,
+          message: replyBody,
+          quotedText: selectedEmail?.bodyText || '',
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addToast(data.message || 'Reply sent successfully! 🚀');
+        setIsReplying(false);
+        setReplyBody('');
+      } else {
+        addToast(data.error || 'Failed to send reply', 'error');
+      }
+    } catch (err) {
+      console.error('Reply send error:', err);
+      addToast('An error occurred while sending reply', 'error');
+    } finally {
+      setReplySending(false);
+    }
+  };
+
   const copyAddress = () => {
     if (!activeInbox) return;
     navigator.clipboard.writeText(activeInbox);
@@ -377,6 +564,17 @@ export default function Home() {
     addToast('Copied address to clipboard!');
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Calculate read / unread counts
+  const unreadCount = emails.filter((em) => !em.isRead).length;
+  const readCount = emails.filter((em) => em.isRead).length;
+
+  // Filtered emails based on selected tab
+  const filteredEmails = emails.filter((em) => {
+    if (emailFilter === 'unread') return !em.isRead;
+    if (emailFilter === 'read') return em.isRead;
+    return true;
+  });
 
   // Render Shimmer for check session
   if (checkingSession) {
@@ -451,153 +649,198 @@ export default function Home() {
               </>
             )}
             <div className="status-badge">
-              <span className="bounce-dot"></span>
-              {activeTab === 'mail' 
-                ? (refreshing ? 'Refreshing...' : 'Live auto-refresh (5s)')
-                : (smsRefreshing ? 'Refreshing...' : 'Live auto-refresh (5s)')
-              }
+              <span className="badge-new-dot" />
+              Service Online
             </div>
           </div>
         </header>
 
-        {/* 1. Unauthenticated Login/Signup Views */}
+        {/* Dynamic Body Content */}
         {!isAuthenticated ? (
           <section className="auth-container">
-            <div className="glass-panel auth-card" style={{ overflow: 'visible' }}>
-              <LoginCartoon focusedField={focusedField} emailLength={authEmail.length} />
-              <h2 className="auth-title" style={{ marginTop: '-0.5rem' }}>{authMode === 'login' ? 'Sign In' : 'Create Account'}</h2>
+            <div className="glass-panel auth-card" style={{ maxWidth: '850px', width: '100%', padding: '2.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
               
+              {/* Main Heading & Mode Switcher */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h2 className="auth-title" style={{ textAlign: 'left', marginBottom: '0.25rem' }}>
+                    {authMode === 'login' ? 'Welcome Back!' : 'Create Account'}
+                  </h2>
+                  <p style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>
+                    {authMode === 'login' ? 'Sign in to access your disposable temporary emails & SMS.' : 'Sign up to generate customized domains, SMS, and inboxes.'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.35)', padding: '0.35rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
+                  <button 
+                    type="button" 
+                    className={`btn-secondary ${authMode === 'login' ? 'btn-primary' : ''}`}
+                    onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                    style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem', border: authMode === 'login' ? 'none' : 'transparent', background: authMode === 'login' ? 'var(--primary)' : 'transparent', color: authMode === 'login' ? '#fff' : 'var(--muted)' }}
+                  >
+                    Login
+                  </button>
+                  <button 
+                    type="button" 
+                    className={`btn-secondary ${authMode === 'signup' ? 'btn-primary' : ''}`}
+                    onClick={() => { setAuthMode('signup'); setAuthError(''); }}
+                    style={{ padding: '0.45rem 1.25rem', borderRadius: '10px', fontSize: '0.85rem', border: authMode === 'signup' ? 'none' : 'transparent', background: authMode === 'signup' ? 'var(--primary)' : 'transparent', color: authMode === 'signup' ? '#fff' : 'var(--muted)' }}
+                  >
+                    Sign Up
+                  </button>
+                </div>
+              </div>
+
               {authError && (
-                <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)', color: 'var(--error)', padding: '0.85rem 1.15rem', borderRadius: '12px', fontSize: '0.85rem', textAlign: 'center' }}>
+                <div style={{ background: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.2)', color: 'var(--error)', padding: '0.85rem 1.25rem', borderRadius: '12px', fontSize: '0.88rem', textAlign: 'center' }}>
                   {authError}
                 </div>
               )}
 
-              <form onSubmit={handleAuthSubmit} className="auth-form">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address</label>
-                  <input 
-                    type="email" 
-                    className="input-field" 
-                    placeholder="name@email.com" 
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    onFocus={() => setFocusedField('email')}
-                    onBlur={() => setFocusedField('')}
-                    required
+              {/* Side-by-Side Cartoon Avatar & Inputs Layout */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '2rem', alignItems: 'center' }}>
+                
+                {/* Left Side: Interactive Cartoon Characters */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 0, 0, 0.2)', border: '1px solid var(--border)', borderRadius: '16px', padding: '1.5rem 1rem' }}>
+                  <LoginCartoon 
+                    isTypingEmail={focusedField === 'email'} 
+                    isTypingPassword={focusedField === 'password'} 
                   />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.75rem', fontWeight: 600 }}>
+                    {focusedField === 'password' ? '🙈 Closing eyes for password privacy!' : focusedField === 'email' ? '👀 Watching your email input...' : '👋 Ready to secure your mailbox!'}
+                  </span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Password</label>
-                  <input 
-                    type="password" 
-                    className="input-field" 
-                    placeholder="••••••••" 
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    onFocus={() => setFocusedField('password')}
-                    onBlur={() => setFocusedField('')}
-                    required
-                  />
-                </div>
+                {/* Right Side: Auth Form Inputs */}
+                <form onSubmit={handleAuthSubmit} className="auth-form" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      className="input-field"
+                      placeholder="name@example.com"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      onFocus={() => setFocusedField('email')}
+                      onBlur={() => setFocusedField('')}
+                      required
+                    />
+                  </div>
 
-                <button type="submit" className="btn-primary" disabled={authLoading} style={{ marginTop: '0.5rem', height: '48px' }}>
-                  {authLoading ? <div className="loader-small"></div> : (authMode === 'login' ? 'Sign In' : 'Sign Up')}
-                </button>
-              </form>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      className="input-field"
+                      placeholder="••••••••"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      onFocus={() => setFocusedField('password')}
+                      onBlur={() => setFocusedField('')}
+                      required
+                    />
+                  </div>
 
-              <div className="auth-toggle">
-                {authMode === 'login' ? (
-                  <>
-                    Don't have an account?{' '}
-                    <span className="auth-toggle-link" onClick={() => { setAuthMode('signup'); setAuthError(''); }}>
-                      Sign Up
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    Already have an account?{' '}
-                    <span className="auth-toggle-link" onClick={() => { setAuthMode('login'); setAuthError(''); }}>
-                      Sign In
-                    </span>
-                  </>
-                )}
+                  <button 
+                    type="submit" 
+                    className="btn-primary" 
+                    disabled={authLoading}
+                    style={{ height: '48px', marginTop: '0.5rem', width: '100%', fontSize: '0.95rem' }}
+                  >
+                    {authLoading ? <div className="loader-small"></div> : authMode === 'login' ? 'Sign In' : 'Create Account'}
+                  </button>
+                </form>
               </div>
+
             </div>
           </section>
         ) : user?.status === 'pending' || user?.status === 'rejected' ? (
-          /* Pending / Rejected Approval view */
+          /* User is logged in but pending admin approval */
           <section className="auth-container">
-            <div className="glass-panel auth-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', textAlign: 'center', border: user?.status === 'rejected' ? '1px solid rgba(244, 63, 94, 0.2)' : '1px solid rgba(147, 51, 234, 0.2)' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', color: user?.status === 'rejected' ? 'var(--error)' : 'var(--primary-hover)' }}>
-                {user?.status === 'rejected' ? (
-                  <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div className="glass-panel auth-card" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
+              <div style={{ 
+                background: user.status === 'rejected' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(147, 51, 234, 0.1)', 
+                border: `1px solid ${user.status === 'rejected' ? 'rgba(244, 63, 94, 0.25)' : 'rgba(147, 51, 234, 0.25)'}`, 
+                borderRadius: '50%', 
+                width: '64px', 
+                height: '64px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                {user.status === 'rejected' ? (
+                  <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--error)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 ) : (
-                  <svg width="64" height="64" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                  <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--primary-hover)' }}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 )}
               </div>
-              <h2 className="auth-title" style={{ background: user?.status === 'rejected' ? 'linear-gradient(to right, #fff, #f43f5e)' : 'linear-gradient(to right, #fff, #c084fc)' }}>
-                {user?.status === 'rejected' ? 'Access Denied' : 'Approval Pending'}
+
+              <h2 className="auth-title" style={{ marginBottom: 0 }}>
+                {user.status === 'rejected' ? 'Account Rejected' : 'Approval Pending'}
               </h2>
-              <p style={{ fontSize: '0.95rem', color: 'var(--muted)', lineHeight: '1.6' }}>
-                Hello <strong>{user?.email}</strong>, {user?.status === 'rejected' 
-                  ? 'your account registration was rejected or suspended by the administrator.' 
-                  : 'your account has been created and is currently pending administrator approval.'}
+
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                {user.status === 'rejected' 
+                  ? 'Your account request was rejected by the administrator. Contact support if this is a mistake.' 
+                  : 'Your account has been created and is currently pending administrator approval.'}
               </p>
-              <p style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: '1.5', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '10px' }}>
-                {user?.status === 'rejected' 
-                  ? 'Please contact support if you believe this is a mistake.' 
-                  : 'Please check back later or contact the administrator to activate your account.'}
-              </p>
-              <button className="btn-secondary" onClick={handleLogout} style={{ marginTop: '0.5rem', height: '48px', width: '100%' }}>
-                Log Out
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '0.75rem 1.25rem', width: '100%', fontSize: '0.85rem', color: '#fff' }}>
+                Account: <strong style={{ color: user.status === 'rejected' ? 'var(--error)' : 'var(--primary-hover)' }}>{user.email}</strong>
+              </div>
+
+              <button className="btn-secondary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={handleLogout}>
+                Sign Out
               </button>
             </div>
           </section>
         ) : (
-          /* 2. Authenticated Dashboard Layout */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+          /* User is logged in and approved -> show dashboard */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
             
-            {/* Workspace Tabs */}
+            {/* Top Workspace Tab Switcher */}
             <div className="workspace-tabs-wrapper">
               <div className="workspace-tabs">
-                <button 
+                <button
                   className={`workspace-tab ${activeTab === 'mail' ? 'active' : ''}`}
                   onClick={() => setActiveTab('mail')}
                 >
-                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
-                  Temp Mail
+                  Email Service
                 </button>
-                <button 
+                <button
                   className={`workspace-tab ${activeTab === 'sms' ? 'active' : ''}`}
                   onClick={() => setActiveTab('sms')}
                 >
-                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
-                  Temp SMS
+                  SMS Service
                 </button>
               </div>
             </div>
 
             {activeTab === 'mail' ? (
               <>
-                {/* Selected Address Display Banner (Full Width at the Top) */}
-                {activeInbox && (
-                  <div className="glass-panel address-display">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        Active Temporary Inbox
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <span className="address-text">{activeInbox}</span>
+                {/* Active Temporary Email Display Banner */}
+                <div className="glass-panel address-display">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Active Temporary Address
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <span className="address-text">{activeInbox || 'No active address selected'}</span>
+                      {activeInbox && (
                         <button className="btn-primary btn-icon" onClick={copyAddress} title="Copy Address" style={{ width: '38px', height: '38px', borderRadius: '10px' }}>
                           {copied ? (
                             <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--success)' }}>
@@ -609,28 +852,35 @@ export default function Home() {
                             </svg>
                           )}
                         </button>
-                      </div>
-                    </div>
-                    <div className="address-actions">
-                      <button className="btn-secondary btn-icon" style={{ color: 'var(--error)', borderColor: 'rgba(244, 63, 94, 0.2)' }} onClick={() => deleteInbox(activeInbox)} title="Discard Inbox">
-                        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      )}
                     </div>
                   </div>
-                )}
+                  <div className="address-actions">
+                    {activeInbox && (
+                      <button 
+                        className="btn-danger" 
+                        onClick={() => deleteInbox(activeInbox)}
+                        style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                      >
+                        Discard Address
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-                {/* Dashboard Workspace Grid (Left Sidebar for controls, Right Sidebar for content) */}
-                <div className="main-dashboard-grid">
+                {/* Dashboard Split Container */}
+                <div className="app-content-wrapper">
                   
-                  {/* Left Sidebar Pane: Create Inbox & My Inboxes stacked */}
+                  {/* Left Sidebar: Inbox Generation & Selection */}
                   <div className="sidebar-pane">
-                    {/* Inbox Creator Control */}
-                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                      <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Create Inbox</h3>
-                      
-                      <div className="tabs-container">
+                    
+                    {/* Inbox Generator Panel */}
+                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div className="pane-header">
+                        <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Create Inbox</h3>
+                      </div>
+
+                      <div className="tab-switcher">
                         <button 
                           className={`tab-btn ${!isCustomMode ? 'active' : ''}`}
                           onClick={() => setIsCustomMode(false)}
@@ -646,7 +896,11 @@ export default function Home() {
                       </div>
 
                       {!isCustomMode ? (
-                        <button className="btn-primary" onClick={() => createInbox('random')} style={{ width: '100%' }}>
+                        <button 
+                          className="btn-primary" 
+                          onClick={() => createInbox('random')}
+                          style={{ width: '100%', height: '46px', gap: '0.5rem' }}
+                        >
                           <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                           </svg>
@@ -692,12 +946,14 @@ export default function Home() {
                             const isActive = activeInbox === inbox.address;
                             return (
                               <div 
-                                key={inbox._id}
+                                key={inbox._id} 
                                 className={`inbox-item-row ${isActive ? 'active' : ''}`}
                                 onClick={() => {
                                   setActiveInbox(inbox.address);
                                   localStorage.setItem('temp_mail_active_inbox', inbox.address);
-                                  setSelectedEmail(null); // Clear selected email on inbox change
+                                  setSelectedEmail(null);
+                                  setSelectedEmailIds([]);
+                                  setIsReplying(false);
                                 }}
                               >
                                 <span className="inbox-item-address" title={inbox.address}>
@@ -724,61 +980,181 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Right Content Pane: Emails grid split pane or Fallback display */}
+                  {/* Right Content Pane: Emails grid split pane */}
                   <div className="content-pane">
                     {activeInbox ? (
                       <div className="dashboard-grid">
                         
                         {/* Emails List */}
                         <div className={`glass-panel inbox-list-pane ${selectedEmail ? 'hide-mobile-pane' : 'mobile-view-list'}`}>
-                          <div className="pane-header">
-                            <h2 className="pane-title">
-                              Emails
-                              <span className="badge">{emails.length}</span>
-                            </h2>
+                          
+                          {/* Pane Header with Title, Stats & Action */}
+                          <div className="pane-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.75rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <h2 className="pane-title">
+                                Emails
+                                <span className="badge">{emails.length}</span>
+                              </h2>
+                              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                {emails.length > 0 && (
+                                  <button 
+                                    onClick={() => fetchEmails(true)}
+                                    className="btn-secondary" 
+                                    style={{ padding: '0.25rem 0.55rem', borderRadius: '8px', fontSize: '0.78rem' }}
+                                    title="Manual refresh"
+                                  >
+                                    Refresh
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Filter Tabs (All / Unread / Read) */}
                             {emails.length > 0 && (
-                              <button 
-                                onClick={() => fetchEmails(true)}
-                                className="btn-secondary" 
-                                style={{ padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}
-                                title="Manual refresh"
-                              >
-                                Refresh
-                              </button>
+                              <div className="email-filter-bar">
+                                <button
+                                  className={`email-filter-btn ${emailFilter === 'all' ? 'active' : ''}`}
+                                  onClick={() => setEmailFilter('all')}
+                                >
+                                  All <span className="email-filter-badge">{emails.length}</span>
+                                </button>
+                                <button
+                                  className={`email-filter-btn ${emailFilter === 'unread' ? 'active' : ''}`}
+                                  onClick={() => setEmailFilter('unread')}
+                                >
+                                  Unread <span className="email-filter-badge" style={{ color: unreadCount > 0 ? '#34d399' : 'inherit', fontWeight: unreadCount > 0 ? 800 : 600 }}>{unreadCount}</span>
+                                </button>
+                                <button
+                                  className={`email-filter-btn ${emailFilter === 'read' ? 'active' : ''}`}
+                                  onClick={() => setEmailFilter('read')}
+                                >
+                                  Read <span className="email-filter-badge">{readCount}</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Bulk Actions Toolbar (Active when 1 or more emails are checked) */}
+                            {selectedEmailIds.length > 0 && (
+                              <div className="bulk-actions-toolbar">
+                                <div className="bulk-actions-left">
+                                  <div 
+                                    className={`custom-checkbox ${selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 ? 'checked' : ''}`}
+                                    onClick={handleToggleSelectAll}
+                                    title={selectedEmailIds.length === filteredEmails.length ? "Deselect All" : "Select All"}
+                                  >
+                                    {selectedEmailIds.length === filteredEmails.length && filteredEmails.length > 0 && (
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </div>
+                                  <span>{selectedEmailIds.length} Selected</span>
+                                </div>
+                                <div className="bulk-actions-right">
+                                  <button 
+                                    className="bulk-btn"
+                                    onClick={() => handleBulkMarkRead(true)}
+                                    title="Mark selected as read"
+                                  >
+                                    Mark Read
+                                  </button>
+                                  <button 
+                                    className="bulk-btn"
+                                    onClick={() => handleBulkMarkRead(false)}
+                                    title="Mark selected as unread"
+                                  >
+                                    Mark Unread
+                                  </button>
+                                  <button 
+                                    className="bulk-btn bulk-btn-danger"
+                                    onClick={handleBulkDeleteEmails}
+                                    title="Delete selected emails"
+                                  >
+                                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    Delete ({selectedEmailIds.length})
+                                  </button>
+                                </div>
+                              </div>
                             )}
                           </div>
 
+                          {/* Emails List Body */}
                           <div className="emails-scroll">
                             {emailsLoading ? (
                               Array.from({ length: 3 }).map((_, i) => (
                                 <div key={i} className="shimmer shimmer-card" />
                               ))
-                            ) : emails.length === 0 ? (
+                            ) : filteredEmails.length === 0 ? (
                               <div className="empty-state">
                                 <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 19v-8.93a2 2 0 01.89-1.664l8-5.333a2 2 0 012.22 0l8 5.333A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-2.25-1.5a2 2 0 00-2.22 0l-2.25 1.5" />
                                 </svg>
-                                <h3 style={{ fontSize: '1rem', color: '#fff' }}>No Messages Received</h3>
+                                <h3 style={{ fontSize: '1rem', color: '#fff' }}>
+                                  {emailFilter === 'unread' ? 'No Unread Messages' : emailFilter === 'read' ? 'No Read Messages' : 'No Messages Received'}
+                                </h3>
                                 <p style={{ fontSize: '0.8rem' }}>Waiting for emails... refreshes every 5 seconds.</p>
                               </div>
                             ) : (
-                              emails.map((email, idx) => {
+                              filteredEmails.map((email, idx) => {
                                 const isSelected = selectedEmail && selectedEmail._id === email._id;
+                                const isChecked = selectedEmailIds.includes(email._id);
+                                const isUnread = !email.isRead;
                                 const timeStr = new Date(email.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                                 return (
                                   <div 
                                     key={email._id} 
-                                    className={`email-card ${isSelected ? 'active' : ''}`}
-                                    onClick={() => setSelectedEmail(email)}
-                                    style={{ animationDelay: `${idx * 0.05}s` }}
+                                    className={`email-card ${isSelected ? 'active' : ''} ${isUnread ? 'unread' : ''}`}
+                                    onClick={() => handleOpenEmail(email)}
+                                    style={{ animationDelay: `${idx * 0.04}s` }}
                                   >
-                                    <div className="email-card-header">
-                                      <span className="email-card-sender">{email.from}</span>
-                                      <span className="email-card-time">{timeStr}</span>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                      {/* Checkbox for bulk selection */}
+                                      <div 
+                                        className={`custom-checkbox ${isChecked ? 'checked' : ''}`}
+                                        onClick={(e) => handleToggleSelectEmail(email._id, e)}
+                                        title={isChecked ? "Deselect email" : "Select email"}
+                                        style={{ marginTop: '2px' }}
+                                      >
+                                        {isChecked && (
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                          </svg>
+                                        )}
+                                      </div>
+
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', flexGrow: 1, minWidth: 0 }}>
+                                        <div className="email-card-header">
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                                            {isUnread && <span className="badge-new-dot" title="Unread email" />}
+                                            <span className="email-card-sender" title={email.from}>{email.from}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+                                            {isUnread && <span className="badge-unread-pill">NEW</span>}
+                                            <span className="email-card-time">{timeStr}</span>
+                                          </div>
+                                        </div>
+                                        <span className="email-card-subject" title={email.subject}>{email.subject}</span>
+                                        <span className="email-card-preview">{email.bodyText || '(HTML message only)'}</span>
+                                      </div>
                                     </div>
-                                    <span className="email-card-subject">{email.subject}</span>
-                                    <span className="email-card-preview">{email.bodyText || '(HTML message only)'}</span>
-                                    <div className="email-card-actions">
+
+                                    {/* Action Buttons on Card */}
+                                    <div className="email-card-actions" style={{ display: 'flex', gap: '0.25rem' }}>
+                                      <button 
+                                        className="btn-card-delete"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleToggleEmailReadStatus(email._id, !email.isRead);
+                                        }}
+                                        title={email.isRead ? "Mark as unread" : "Mark as read"}
+                                      >
+                                        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                        </svg>
+                                      </button>
                                       <button 
                                         className="btn-card-delete"
                                         onClick={(e) => deleteSingleEmail(email._id, e)}
@@ -810,7 +1186,12 @@ export default function Home() {
 
                               <div className="reader-header">
                                 <div className="reader-meta">
-                                  <h2 className="reader-subject">{selectedEmail.subject}</h2>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                                    <h2 className="reader-subject">{selectedEmail.subject}</h2>
+                                    {!selectedEmail.isRead && (
+                                      <span className="badge-unread-pill">NEW</span>
+                                    )}
+                                  </div>
                                   <div className="reader-from">
                                     From: <span>{selectedEmail.from}</span>
                                   </div>
@@ -821,17 +1202,35 @@ export default function Home() {
                                     Received: {new Date(selectedEmail.createdAt).toLocaleString()}
                                   </div>
                                 </div>
-                                <div className="reader-actions">
+                                <div className="reader-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <button 
+                                    className="btn-primary" 
+                                    onClick={handleStartReply}
+                                    style={{ padding: '0.4rem 0.95rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', borderRadius: '10px' }}
+                                  >
+                                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
+                                    </svg>
+                                    Reply
+                                  </button>
+                                  <button 
+                                    className="btn-secondary" 
+                                    onClick={() => handleToggleEmailReadStatus(selectedEmail._id, !selectedEmail.isRead)}
+                                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
+                                  >
+                                    {selectedEmail.isRead ? 'Mark Unread' : 'Mark Read'}
+                                  </button>
                                   <button 
                                     className="btn-danger" 
                                     onClick={() => deleteSingleEmail(selectedEmail._id)}
-                                    style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '10px' }}
                                   >
                                     Delete
                                   </button>
                                 </div>
                               </div>
 
+                              {/* Reader Body */}
                               <div className="reader-body-wrapper">
                                 {selectedEmail.bodyHtml ? (
                                   (() => {
@@ -876,6 +1275,82 @@ export default function Home() {
                                   </div>
                                 )}
                               </div>
+
+                              {/* Reply Message Composer Form */}
+                              {isReplying && (
+                                <div className="reader-reply-card">
+                                  <div className="reader-reply-header">
+                                    <div className="reader-reply-title">
+                                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--primary-hover)' }}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a5 5 0 015 5v2m-15-7l6-6m-6 6l6 6" />
+                                      </svg>
+                                      Reply Message
+                                    </div>
+                                    <button 
+                                      onClick={() => setIsReplying(false)}
+                                      style={{ background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '0.2rem' }}
+                                      title="Close reply composer"
+                                    >
+                                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                      </svg>
+                                    </button>
+                                  </div>
+
+                                  <div className="reader-reply-meta">
+                                    <div>From: <strong>{activeInbox}</strong></div>
+                                    <div>To: <strong>{replyRecipient}</strong></div>
+                                    <div>Subject: <strong>{replySubject}</strong></div>
+                                  </div>
+
+                                  {selectedEmail.bodyText && (
+                                    <div className="reader-reply-quote-preview">
+                                      <strong>Quoted:</strong> {selectedEmail.bodyText.substring(0, 180)}...
+                                    </div>
+                                  )}
+
+                                  <form onSubmit={handleSendReply} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    <textarea
+                                      className="reader-reply-textarea"
+                                      placeholder="Type your reply message here..."
+                                      value={replyBody}
+                                      onChange={(e) => setReplyBody(e.target.value)}
+                                      required
+                                      autoFocus
+                                    />
+                                    <div className="reader-reply-actions">
+                                      <button 
+                                        type="button" 
+                                        className="btn-secondary" 
+                                        onClick={() => setIsReplying(false)}
+                                        style={{ padding: '0.45rem 1rem', fontSize: '0.82rem', borderRadius: '10px' }}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button 
+                                        type="submit" 
+                                        className="btn-primary" 
+                                        disabled={replySending}
+                                        style={{ padding: '0.45rem 1.25rem', fontSize: '0.82rem', borderRadius: '10px', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+                                      >
+                                        {replySending ? (
+                                          <>
+                                            <div className="loader-small" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                                            Sending...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                            </svg>
+                                            Send Reply
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+                                  </form>
+                                </div>
+                              )}
                             </>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '350px', color: 'var(--muted)', gap: '0.5rem' }}>
@@ -901,7 +1376,7 @@ export default function Home() {
               </>
             ) : (
               <>
-                {/* Active Phone Number Display Banner (Full Width at the Top of SMS workspace) */}
+                {/* Active Phone Number Display Banner */}
                 <div className="glass-panel address-display">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -923,38 +1398,18 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="address-actions" style={{ minHeight: '46px' }}>
-                    {/* Placeholder space to match delete button height for spacing */}
                   </div>
                 </div>
 
                 {/* SMS Grid Workspace */}
-                <div className="main-dashboard-grid">
-                  {/* Left Sidebar Pane: Instructions */}
-                  <div className="sidebar-pane">
-                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                      <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>SMS Workspace Info</h3>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: '1.5', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <p>
-                          This is a shared temporary phone number provided by your Twilio account.
-                        </p>
-                        <p>
-                          Use this number to receive SMS verifications, OTPs, and text messages.
-                        </p>
-                        <p style={{ color: 'var(--primary-hover)', fontWeight: '600' }}>
-                          ⚠️ IMPORTANT: As a shared Twilio trial number, anyone using this app can see messages received on this number.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Content Pane: SMS Messages List */}
-                  <div className="content-pane">
-                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%', minHeight: '400px' }}>
-                      <div className="pane-header">
-                        <h2 className="pane-title">
-                          SMS Inbox
-                          <span className="badge">{smsList.length}</span>
-                        </h2>
+                <div className="content-pane" style={{ width: '100%' }}>
+                  <div className="glass-panel inbox-list-pane" style={{ width: '100%', minHeight: '500px' }}>
+                    <div className="pane-header">
+                      <h2 className="pane-title">
+                        Received SMS Messages
+                        <span className="badge">{smsList.length}</span>
+                      </h2>
+                      {smsList.length > 0 && (
                         <button 
                           onClick={() => fetchSms(true)}
                           className="btn-secondary" 
@@ -963,62 +1418,67 @@ export default function Home() {
                         >
                           Refresh
                         </button>
-                      </div>
+                      )}
+                    </div>
 
-                      <div className="emails-scroll" style={{ maxHeight: '600px' }}>
-                        {smsLoading ? (
-                          Array.from({ length: 3 }).map((_, i) => (
-                            <div key={i} className="shimmer shimmer-card" style={{ height: '110px' }} />
-                          ))
-                        ) : smsList.length === 0 ? (
-                          <div className="empty-state">
-                            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            <h3 style={{ fontSize: '1rem', color: '#fff' }}>No SMS Received Yet</h3>
-                            <p style={{ fontSize: '0.8rem' }}>Send an SMS/OTP to the number above. Refreshes every 5 seconds.</p>
-                          </div>
-                        ) : (
-                          smsList.map((sms, idx) => {
-                            const timeStr = new Date(sms.createdAt).toLocaleString();
-                            return (
-                              <div 
-                                key={sms._id} 
-                                className="email-card"
-                                style={{ animationDelay: `${idx * 0.05}s`, cursor: 'default' }}
-                              >
-                                <div className="email-card-header">
-                                  <span className="email-card-sender" style={{ color: 'var(--primary-hover)' }}>
-                                    From: {sms.from}
-                                  </span>
-                                  <span className="email-card-time">{timeStr}</span>
-                                </div>
-                                <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: '500', marginTop: '0.5rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                  {sms.body}
-                                </div>
-                                <div className="email-card-actions">
-                                  <button 
-                                    className="btn-card-delete"
-                                    onClick={() => deleteSms(sms._id)}
-                                    title="Delete Message"
-                                  >
-                                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                  </button>
-                                </div>
+                    <div className="emails-scroll" style={{ maxHeight: '650px' }}>
+                      {smsLoading ? (
+                        Array.from({ length: 3 }).map((_, i) => (
+                          <div key={i} className="shimmer shimmer-card" />
+                        ))
+                      ) : smsList.length === 0 ? (
+                        <div className="empty-state">
+                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                          <h3 style={{ fontSize: '1rem', color: '#fff' }}>No SMS Messages Received</h3>
+                          <p style={{ fontSize: '0.8rem' }}>Send SMS to the temporary number above. Refreshes every 5 seconds.</p>
+                        </div>
+                      ) : (
+                        smsList.map((sms, idx) => {
+                          const timeStr = new Date(sms.createdAt).toLocaleString();
+                          return (
+                            <div 
+                              key={sms._id} 
+                              className="email-card"
+                              style={{ animationDelay: `${idx * 0.05}s`, cursor: 'default' }}
+                            >
+                              <div className="email-card-header">
+                                <span className="email-card-sender" style={{ color: 'var(--primary-hover)', fontWeight: 700 }}>
+                                  From: {sms.from}
+                                </span>
+                                <span className="email-card-time">{timeStr}</span>
                               </div>
-                            );
-                          })
-                        )}
-                      </div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.25rem' }}>
+                                To: {sms.to}
+                              </div>
+                              <div style={{ fontSize: '0.95rem', color: '#fff', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                                {sms.body}
+                              </div>
+                              <div className="email-card-actions">
+                                <button 
+                                  className="btn-card-delete"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteSms(sms._id);
+                                  }}
+                                  title="Delete SMS"
+                                >
+                                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 </div>
               </>
             )}
           </div>
-
         )}
       </div>
 
