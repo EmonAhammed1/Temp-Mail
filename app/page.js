@@ -868,8 +868,8 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Dashboard Split Container */}
-                <div className="app-content-wrapper">
+                {/* Dashboard Workspace Grid (Left Sidebar for controls, Right Sidebar for content) */}
+                <div className="main-dashboard-grid">
                   
                   {/* Left Sidebar: Inbox Generation & Selection */}
                   <div className="sidebar-pane">
@@ -1401,78 +1401,99 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* SMS Grid Workspace */}
-                <div className="content-pane" style={{ width: '100%' }}>
-                  <div className="glass-panel inbox-list-pane" style={{ width: '100%', minHeight: '500px' }}>
-                    <div className="pane-header">
-                      <h2 className="pane-title">
-                        Received SMS Messages
-                        <span className="badge">{smsList.length}</span>
-                      </h2>
-                      {smsList.length > 0 && (
-                        <button 
-                          onClick={() => fetchSms(true)}
-                          className="btn-secondary" 
-                          style={{ padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}
-                          title="Manual refresh"
-                        >
-                          Refresh
-                        </button>
-                      )}
+                {/* SMS Grid Workspace (Left Sidebar Info, Right SMS Content) */}
+                <div className="main-dashboard-grid">
+                  {/* Left Sidebar Pane: Instructions */}
+                  <div className="sidebar-pane">
+                    <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>SMS Workspace Info</h3>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--muted)', lineHeight: '1.5', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <p>
+                          This is a shared temporary phone number provided by your Twilio account.
+                        </p>
+                        <p>
+                          Use this number to receive SMS verifications, OTPs, and text messages.
+                        </p>
+                        <p style={{ color: 'var(--primary-hover)', fontWeight: '600' }}>
+                          ⚠️ IMPORTANT: As a shared Twilio trial number, anyone using this app can see messages received on this number.
+                        </p>
+                      </div>
                     </div>
+                  </div>
 
-                    <div className="emails-scroll" style={{ maxHeight: '650px' }}>
-                      {smsLoading ? (
-                        Array.from({ length: 3 }).map((_, i) => (
-                          <div key={i} className="shimmer shimmer-card" />
-                        ))
-                      ) : smsList.length === 0 ? (
-                        <div className="empty-state">
-                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                          </svg>
-                          <h3 style={{ fontSize: '1rem', color: '#fff' }}>No SMS Messages Received</h3>
-                          <p style={{ fontSize: '0.8rem' }}>Send SMS to the temporary number above. Refreshes every 5 seconds.</p>
-                        </div>
-                      ) : (
-                        smsList.map((sms, idx) => {
-                          const timeStr = new Date(sms.createdAt).toLocaleString();
-                          return (
-                            <div 
-                              key={sms._id} 
-                              className="email-card"
-                              style={{ animationDelay: `${idx * 0.05}s`, cursor: 'default' }}
-                            >
-                              <div className="email-card-header">
-                                <span className="email-card-sender" style={{ color: 'var(--primary-hover)', fontWeight: 700 }}>
-                                  From: {sms.from}
-                                </span>
-                                <span className="email-card-time">{timeStr}</span>
+                  {/* Right Content Pane: SMS Messages List */}
+                  <div className="content-pane">
+                    <div className="glass-panel inbox-list-pane" style={{ width: '100%', minHeight: '500px' }}>
+                      <div className="pane-header">
+                        <h2 className="pane-title">
+                          Received SMS Messages
+                          <span className="badge">{smsList.length}</span>
+                        </h2>
+                        {smsList.length > 0 && (
+                          <button 
+                            onClick={() => fetchSms(true)}
+                            className="btn-secondary" 
+                            style={{ padding: '0.25rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}
+                            title="Manual refresh"
+                          >
+                            Refresh
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="emails-scroll" style={{ maxHeight: '650px' }}>
+                        {smsLoading ? (
+                          Array.from({ length: 3 }).map((_, i) => (
+                            <div key={i} className="shimmer shimmer-card" />
+                          ))
+                        ) : smsList.length === 0 ? (
+                          <div className="empty-state">
+                            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                            <h3 style={{ fontSize: '1rem', color: '#fff' }}>No SMS Messages Received</h3>
+                            <p style={{ fontSize: '0.8rem' }}>Send SMS to the temporary number above. Refreshes every 5 seconds.</p>
+                          </div>
+                        ) : (
+                          smsList.map((sms, idx) => {
+                            const timeStr = new Date(sms.createdAt).toLocaleString();
+                            return (
+                              <div 
+                                key={sms._id} 
+                                className="email-card"
+                                style={{ animationDelay: `${idx * 0.05}s`, cursor: 'default' }}
+                              >
+                                <div className="email-card-header">
+                                  <span className="email-card-sender" style={{ color: 'var(--primary-hover)', fontWeight: 700 }}>
+                                    From: {sms.from}
+                                  </span>
+                                  <span className="email-card-time">{timeStr}</span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.25rem' }}>
+                                  To: {sms.to}
+                                </div>
+                                <div style={{ fontSize: '0.95rem', color: '#fff', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                                  {sms.body}
+                                </div>
+                                <div className="email-card-actions">
+                                  <button 
+                                    className="btn-card-delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteSms(sms._id);
+                                    }}
+                                    title="Delete SMS"
+                                  >
+                                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
                               </div>
-                              <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.25rem' }}>
-                                To: {sms.to}
-                              </div>
-                              <div style={{ fontSize: '0.95rem', color: '#fff', lineHeight: 1.5, background: 'rgba(0,0,0,0.2)', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                                {sms.body}
-                              </div>
-                              <div className="email-card-actions">
-                                <button 
-                                  className="btn-card-delete"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteSms(sms._id);
-                                  }}
-                                  title="Delete SMS"
-                                >
-                                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
